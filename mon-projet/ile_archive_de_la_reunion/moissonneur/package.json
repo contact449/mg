@@ -1,0 +1,11 @@
+{
+  "name": "idlr-moissonneur",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Récolte des actes IDLR (iledelareunion-archive.com) en CSV",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node harvest.cjs",
+    "test": "node harvest.cjs --selftest"
+  }
+}

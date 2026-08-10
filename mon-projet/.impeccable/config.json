@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "cubic-bezier(.3, 1.35, .5, 1)",
+        "createdAt": "2026-07-29T16:42:09.416Z",
+        "reason": "User confirmed: ressort du segmenté, reprise du spring framer-motion d'origine"
+      }
+    ]
+  }
+}

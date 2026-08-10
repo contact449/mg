@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/* Peau « Linear » : dense, contrastée, bordures fines plutôt qu'ombres, */
+/* accent émeraude (signature Archives — DemSuiv est orange), thèmes clair + sombre automatiques (suit le système). */
+/* Les rôles de couleur sont des variables CSS qui basculent en sombre ;  */
+/* l'échelle neutral y est remappée pour que tout l'app suive sans être   */
+/* touché composant par composant.                                        */
+/* ------------------------------------------------------------------ */
+:root {
+	--n-50: #ffffff;   /* surface (cartes) */
+	--n-100: #edf4ef;  /* fond de page (teinté émeraude — signature de l'app) */
+	--n-200: #ebebe9;  /* remplissage discret / bordure fine */
+	--n-300: #dedddb;  /* bordure marquée */
+	--n-400: #9b9ca1;  /* icônes / texte très discret */
+	--n-500: #6c6e73;  /* texte secondaire */
+	--n-600: #55565b;
+	--n-700: #3f4044;
+	--n-800: #2a2b2e;
+	--n-900: #1b1c1e;  /* texte principal */
+	--n-950: #0c0d0e;
+	--accent: #059669; /* émeraude — couleur signature Archives */
+}
+
+/* Fond signature : page teintée + halo d'accent en haut de page —
+   identifie l'app (émeraude) face à sa sœur DemSuiv (orange). */
+.fond-app {
+	background-color: var(--n-100);
+	background-image: radial-gradient(1400px 620px at 50% -180px,
+		color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%);
+	background-repeat: no-repeat;
+}
+
+/* Chrome teinté (en-tête, barre du bas, rail latéral) : la couleur signature
+   reste visible même quand l'écran est couvert de cartes. Translucide pour
+   laisser travailler le backdrop-blur. */
+.chrome-app {
+	background-color: color-mix(in srgb,
+		color-mix(in srgb, var(--accent) 14%, var(--n-100)) 88%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--n-50: #17181b;   /* surface (cartes) */
+		--n-100: #090f0c;  /* fond de page (teinté émeraude — signature de l'app) */
+		--n-200: #26272c;  /* remplissage discret / bordure fine */
+		--n-300: #34353b;  /* bordure marquée */
+		--n-400: #595b62;  /* icônes / texte très discret */
+		--n-500: #8a8d95;  /* texte secondaire */
+		--n-600: #a4a7ad;
+		--n-700: #c1c3c8;
+		--n-800: #d8dade;
+		--n-900: #ededef;  /* texte principal */
+		--n-950: #fbfbfc;
+		--accent: #10b981; /* émeraude clair pour le sombre */
+	}
+	img { outline-color: rgb(255 255 255 / 0.08); }
+}
+
+@theme inline {
+	--color-neutral-50: var(--n-50);
+	--color-neutral-100: var(--n-100);
+	--color-neutral-200: var(--n-200);
+	--color-neutral-300: var(--n-300);
+	--color-neutral-400: var(--n-400);
+	--color-neutral-500: var(--n-500);
+	--color-neutral-600: var(--n-600);
+	--color-neutral-700: var(--n-700);
+	--color-neutral-800: var(--n-800);
+	--color-neutral-900: var(--n-900);
+	--color-neutral-950: var(--n-950);
+
+	--color-tampon: var(--accent);
+
+	--font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+	--font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+	--font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+	--shadow-carte: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+	--shadow-carte-hover: 0 2px 4px -1px rgb(0 0 0 / 0.07), 0 8px 20px -6px rgb(0 0 0 / 0.12);
+}
+
+@layer base {
+	* {
+		border-color: var(--color-neutral-200);
+	}
+	body {
+		@apply bg-neutral-100 text-neutral-900 antialiased;
+		letter-spacing: -0.006em;
+		font-feature-settings: "cv05" 1, "ss01" 1;
+	}
+	h1, h2, h3 {
+		text-wrap: balance;
+		letter-spacing: -0.02em;
+	}
+	p {
+		text-wrap: pretty;
+	}
+}
+
+@layer utilities {
+	.no-scrollbar {
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+	}
+	.no-scrollbar::-webkit-scrollbar {
+		display: none;
+	}
+
+	@keyframes voile-in {
+		from { opacity: 0; }
+	}
+	@keyframes boite-in {
+		from { opacity: 0; transform: translateY(4px) scale(0.985); }
+	}
+	.animation-voile { animation: voile-in 0.14s ease-out; }
+	.animation-boite { animation: boite-in 0.16s cubic-bezier(0.2, 0, 0, 1); }
+
+	@keyframes toast-in {
+		from { opacity: 0; transform: translateY(10px); filter: blur(3px); }
+	}
+	.animation-toast { animation: toast-in 0.26s cubic-bezier(0.2, 0, 0, 1); }
+}
