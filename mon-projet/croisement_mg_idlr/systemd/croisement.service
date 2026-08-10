@@ -1,0 +1,34 @@
+# Mise a jour semestrielle du croisement MG x IDLR.
+# Installation :
+#   sudo cp systemd/croisement.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now croisement.timer
+[Unit]
+Description=Croisement des matricules cherchemg.fr x iledelareunion-archive.com
+Documentation=file:/home/ubuntu/croisement_mg_idlr/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/croisement_mg_idlr
+ExecStart=/usr/bin/node maj.cjs
+
+# La passe IDLR fait ~3250 requetes a 3 s : plusieurs heures. Pas de minuterie
+# de securite trop courte, sinon systemd tuerait une execution normale.
+TimeoutStartSec=20h
+
+# Webhook Discord facultatif (voir notify.cjs du moissonneur).
+# Environment=IDLR_DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
+# Chemins des sources si elles ne sont pas aux emplacements par defaut :
+# Environment=IDLR_DB=/home/ubuntu/moissonneur/actes.db
+# Environment=IDLR_OUT=/home/ubuntu/moissonneur/actes.csv
+
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=append:/home/ubuntu/croisement_mg_idlr/maj.log
+StandardError=append:/home/ubuntu/croisement_mg_idlr/maj.log
+
+[Install]
+WantedBy=multi-user.target

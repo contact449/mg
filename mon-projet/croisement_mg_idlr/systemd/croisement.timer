@@ -1,0 +1,16 @@
+# Tous les six mois : 1er janvier et 1er juillet, a 03h00 (heure locale du VPS).
+[Unit]
+Description=Croisement MG x IDLR (semestriel)
+
+[Timer]
+OnCalendar=*-01,07-01 03:00:00
+
+# Si le VPS etait eteint a l'heure dite, la mise a jour part au demarrage
+# suivant au lieu d'etre perdue jusqu'au semestre d'apres.
+Persistent=true
+
+# Evite que tous les timers du VPS partent a la meme seconde.
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

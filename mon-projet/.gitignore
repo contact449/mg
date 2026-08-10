@@ -16,6 +16,18 @@ dist/
 *.csv
 *.pdf
 
+# Sorties des moissonneurs et du croisement.
+# Les gros fichiers (actes.csv, mg_matricules.csv, mg_fiches.csv) sont déjà
+# couverts par *.csv ci-dessus ; restent les petits états d'exécution. Ils se
+# régénèrent, et ils vivent sur le VPS — les commiter créerait des conflits
+# entre machines. historique.json compris : c'est le journal du VPS, pas du repo.
+*/moissonneur/*_etat.json
+*/moissonneur/checkpoint.json
+*/moissonneur/heartbeat
+croisement_mg_idlr/resume.json
+croisement_mg_idlr/historique.json
+*.log
+
 # Paramètres locaux de ton éditeur (VS Code)
 .vscode/
 

@@ -176,6 +176,13 @@ cela représente **plusieurs jours**. Réserve-le aux numéros qui t'intéressen
 (`min` / `max`), ou laisse tourner en fond. Alimente `MG_Fiches` avec origine,
 naissance, arrivée, convoi, immatriculation, notes, contributeur, releveur.
 
+> **Pour la série entière, préfère le moissonneur.** Apps Script coupe à 6 min
+> par exécution : la reprise automatique fonctionne, mais enchaîner ~33 h de
+> requêtes par déclencheurs est fragile. [`moissonneur/`](moissonneur/) fait le
+> même travail en Node, en continu, avec reprise sur le fichier de sortie —
+> conçu pour tourner détaché sur le VPS. Le module Apps Script reste le bon
+> outil pour l'index (90 s) et pour les recherches à l'unité.
+
 ### À l'unité
 
 ```js
