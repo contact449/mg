@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+/* ---------------------------------------------------------------- palette --
+   Rôles plutôt que hex en dur : les valeurs sombres se substituent en un
+   seul endroit. Slots catégoriels 1 et 2 validés en clair ET en sombre
+   (ΔE CVD 24,7 / 26,8 ; vision normale 33,6 / 31,8 ; contraste ≥ 3:1).      */
+:root {
+  color-scheme: light;
+  --surface-1:      #fcfcfb;
+  --plane:          #f9f9f7;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --gridline:       #e1e0d9;
+  --baseline:       #c3c2b7;
+  --border:         rgba(11,11,11,0.10);
+  --series-1:       #2a78d6;
+  --series-2:       #eb6834;
+  --track:          #cde2fb;   /* piste du compteur : pas plus clair que ça */
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --plane:          #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --track:          #184f95;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1:      #1a1a19;
+  --plane:          #0d0d0d;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #898781;
+  --gridline:       #2c2c2a;
+  --baseline:       #383835;
+  --border:         rgba(255,255,255,0.10);
+  --series-1:       #3987e5;
+  --series-2:       #d95926;
+  --track:          #184f95;
+}
+
+* { box-sizing: border-box; }
+/* Le fond est porté par <html> : sinon, quand le contenu est court (état
+   vide), le blanc du navigateur apparaît sous la page. */
+html { background: var(--plane); }
+html, body { margin: 0; padding: 0; min-height: 100%; }
+body { background: var(--plane); }
+
+.viz-root {
+  color: var(--text-primary);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 18px 20px 24px;
+}
+
+/* ------------------------------------------------------------------ entête */
+.entete {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.hero-label { font-size: 12px; color: var(--text-secondary); }
+.hero-value {
+  font-size: 52px; font-weight: 600; line-height: 1.05; letter-spacing: -0.02em;
+  margin: 2px 0 3px;                     /* chiffres proportionnels : pas de tabular-nums */
+}
+.hero-sub { font-size: 12px; color: var(--text-muted); }
+
+.compteur { min-width: 260px; flex: 0 1 300px; }
+.compteur-tete {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;
+}
+.compteur-tete b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.piste { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.remplissage { height: 100%; border-radius: 4px; background: var(--series-1); }
+.compteur-note { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+/* -------------------------------------------------------------- tuiles KPI */
+.kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.tuile {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 13px;
+}
+.tuile-label { font-size: 11px; color: var(--text-secondary); }
+.tuile-valeur { font-size: 22px; font-weight: 600; margin-top: 2px; }
+.tuile-note { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+/* ------------------------------------------------------------------ cartes */
+.grille2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.carte {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px 12px; margin-bottom: 12px;
+}
+.carte h2 { font-size: 13px; font-weight: 600; margin: 0; }
+.carte .sous { font-size: 11px; color: var(--text-muted); margin: 2px 0 10px; }
+.carte svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+/* ----------------------------------------------------------------- légende */
+.legende { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 10px; padding: 0; list-style: none; }
+.legende li { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-secondary); }
+.pastille { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.legende b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+/* ----------------------------------------------------------------- tableau */
+.barre-outils { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.bouton {
+  font: inherit; font-size: 12px; color: var(--text-primary);
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 7px; padding: 5px 11px; cursor: pointer;
+}
+.bouton:hover { background: var(--plane); }
+table.donnees { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.donnees caption {
+  text-align: left; font-weight: 600; padding: 14px 0 6px; color: var(--text-primary);
+}
+table.donnees th, table.donnees td {
+  text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--gridline);
+}
+table.donnees th { color: var(--text-secondary); font-weight: 500; }
+table.donnees th.n { text-align: right; }
+table.donnees td.n { text-align: right; font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+
+/* ---------------------------------------------------------------- infobulle */
+#infobulle {
+  position: fixed; z-index: 10; pointer-events: none; opacity: 0;
+  transition: opacity .08s; background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 6px 9px; font-size: 12px; color: var(--text-primary);
+  box-shadow: 0 4px 14px rgba(0,0,0,.14); white-space: nowrap;
+}
+#infobulle .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+#infobulle .s { color: var(--text-muted); }
+
+.vide { text-align: center; padding: 46px 20px; color: var(--text-secondary); }
+.vide .gros { font-size: 15px; color: var(--text-primary); margin-bottom: 6px; }
+.pied { font-size: 11px; color: var(--text-muted); margin-top: 14px; }
+.pied a { color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="viz-root" id="racine"></div>
+<div id="infobulle"></div>
+
+<script>
+var D = <?!= donnees ?>;
+
+/* --------------------------------------------------------------- utilitaires */
+
+/* Largeurs des viewBox, en px CSS réels : une carte pleine largeur et une
+   demi-carte de la grille à 2 colonnes. Un SVG dont le viewBox ne fait pas
+   la largeur de son conteneur est mis à l'échelle — texte compris. */
+var LARGEUR_PLEINE = 856;
+var LARGEUR_DEMI   = 404;
+
+var nf = new Intl.NumberFormat('fr-FR');
+var nf2 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
+function n(v) { return nf.format(v || 0); }
+function pct(part, tout) { return tout ? nf2.format(Math.round(part / tout * 1000) / 10) : 0; }
+/** 1 -> « 1 engagé » ; 4 -> « 4 engagés et + » (la dernière classe est ouverte). */
+function libelleEngages(d) {
+  return d.engages + ' engagé' + (d.engages > 1 ? 's' : '') + (d.engages >= 4 ? ' et +' : '');
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+/** Plafond « rond » pour l'axe : 1/2/5 × 10^k au-dessus du max. */
+function maxRond(v) {
+  if (v <= 0) return 1;
+  var e = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
+  var m = v / e;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * e;
+}
+/** Barre à bout arrondi : 4px côté donnée, d'équerre à la ligne de base. */
+function barreV(x, y, w, h) {          // colonne : arrondie en haut
+  var r = Math.min(4, h);
+  if (h <= 0) return '';
+  return 'M' + x + ',' + (y + h) + 'V' + (y + r) +
+         'a' + r + ',' + r + ' 0 0 1 ' + r + ',' + -r +
+         'h' + (w - 2 * r) +
+         'a' + r + ',' + r + ' 0 0 1 ' + r + ',' + r +
+         'V' + (y + h) + 'Z';
+}
+function barreH(x, y, w, h) {          // barre : arrondie à droite
+  var r = Math.min(4, w);
+  if (w <= 0) return '';
+  return 'M' + x + ',' + y + 'h' + (w - r) +
+         'a' + r + ',' + r + ' 0 0 1 ' + r + ',' + r +
+         'v' + (h - 2 * r) +
+         'a' + r + ',' + r + ' 0 0 1 ' + -r + ',' + r +
+         'H' + x + 'Z';
+}
+
+/* --------------------------------------------------------------- infobulle */
+var bulle = document.getElementById('infobulle');
+function surMarque(el, html) {
+  el.addEventListener('mousemove', function (e) {
+    bulle.innerHTML = html;
+    bulle.style.opacity = 1;
+    var r = bulle.getBoundingClientRect();
+    var x = Math.min(e.clientX + 14, window.innerWidth - r.width - 8);
+    var y = Math.max(e.clientY - r.height - 12, 6);
+    bulle.style.left = x + 'px';
+    bulle.style.top = y + 'px';
+  });
+  el.addEventListener('mouseleave', function () { bulle.style.opacity = 0; });
+}
+
+/* ------------------------------------------------------------- histogramme */
+/** Colonnes : matricules distincts par tranche. Une seule série -> une seule
+    teinte (slot 1) ; la hauteur porte déjà la magnitude, pas la couleur. */
+function histogramme(tranches, taille) {
+  var W = LARGEUR_PLEINE, H = 244, mT = 16, mR = 8, mB = 34, mL = 48;
+  var pW = W - mL - mR, pH = H - mT - mB;
+  var haut = maxRond(Math.max.apply(null, tranches.map(function (t) { return t.n; })) || 1);
+  var bande = pW / tranches.length;
+  var largeur = Math.min(24, bande - 10);
+  var maxN = Math.max.apply(null, tranches.map(function (t) { return t.n; }));
+  var iMax = tranches.map(function (t) { return t.n; }).indexOf(maxN);   // une seule étiquette
+
+  var s = ['<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Matricules par tranche">'];
+
+  // grille + graduations, arrondies à des nombres propres
+  for (var i = 0; i <= 4; i++) {
+    var val = haut * i / 4, y = mT + pH - pH * i / 4;
+    s.push('<line x1="' + mL + '" y1="' + y + '" x2="' + (W - mR) + '" y2="' + y +
+           '" stroke="var(--gridline)" stroke-width="1"/>');
+    s.push('<text x="' + (mL - 8) + '" y="' + (y + 3.5) + '" text-anchor="end" font-size="10" ' +
+           'fill="var(--text-muted)" style="font-variant-numeric:tabular-nums">' + n(val) + '</text>');
+  }
+  s.push('<line x1="' + mL + '" y1="' + (mT + pH) + '" x2="' + (W - mR) + '" y2="' + (mT + pH) +
+         '" stroke="var(--baseline)" stroke-width="1"/>');
+
+  tranches.forEach(function (t, i) {
+    var h = pH * t.n / haut;
+    var xb = mL + i * bande;
+    var x = xb + (bande - largeur) / 2;
+    var y = mT + pH - h;
+
+    // cible de survol : toute la bande, bien plus large que la colonne
+    s.push('<g class="bande" data-i="' + i + '">');
+    s.push('<rect x="' + xb + '" y="' + mT + '" width="' + bande + '" height="' + pH + '" fill="transparent"/>');
+    if (h > 0) s.push('<path d="' + barreV(x, y, largeur, h) + '" fill="var(--series-1)"/>');
+    s.push('</g>');
+
+    // étiquette directe sur la seule colonne maximale (jamais sur toutes)
+    if (i === iMax && maxN > 0) {
+      s.push('<text x="' + (xb + bande / 2) + '" y="' + (y - 6) + '" text-anchor="middle" ' +
+             'font-size="11" font-weight="600" fill="var(--text-primary)" ' +
+             'style="font-variant-numeric:tabular-nums">' + n(t.n) + '</text>');
+    }
+    var borne = (t.debut - 1) / 1000;
+    s.push('<text x="' + (xb + bande / 2) + '" y="' + (mT + pH + 15) + '" text-anchor="middle" ' +
+           'font-size="10" fill="var(--text-muted)">' + (borne ? borne + 'k' : '0') + '</text>');
+  });
+
+  s.push('<text x="' + mL + '" y="' + (H - 4) + '" font-size="10" fill="var(--text-muted)">' +
+         'numéro de matricule</text>');
+  s.push('</svg>');
+  return { html: s.join(''), max: haut };
+}
+
+/* ----------------------------------------------------- barre part-à-tout */
+/** Deux segments séparés par un vide de 2px dans la couleur du fond.
+    Les valeurs vivent dans la légende : aucune étiquette ne peut être
+    rognée par un segment trop court. */
+function partATout(a, b, total) {
+  var W = LARGEUR_DEMI, H = 24, gap = 2;
+  var wa = total ? Math.max(0, (W - gap) * a / total) : 0;
+  var wb = total ? Math.max(0, (W - gap) * b / total) : 0;
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Répartition par série">' +
+    '<g class="seg" data-k="p">' + '<path d="' + barreH(0, 0, wa, H) + '" fill="var(--series-1)"/></g>' +
+    '<g class="seg" data-k="a">' + '<path d="' + barreH(wa + gap, 0, wb, H) + '" fill="var(--series-2)"/></g>' +
+    '</svg>';
+}
+
+/* ------------------------------------------------- barres horizontales */
+/** @param {number} W largeur du viewBox — DOIT valoir la largeur réelle de la
+    carte, sinon le SVG est mis à l'échelle et le texte enfle avec lui. */
+function barres(items, libelle, valeur, W) {
+  var ligne = 26, hb = 13, mR = 52;
+  var largeurLib = Math.round(W * 0.31);
+  var pW = W - largeurLib - mR;
+  var haut = maxRond(Math.max.apply(null, items.map(valeur)) || 1);
+  var H = items.length * ligne + 4;
+
+  var s = ['<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Classement">'];
+  items.forEach(function (it, i) {
+    var y = i * ligne + 4;
+    var w = pW * valeur(it) / haut;
+    s.push('<g class="rang" data-i="' + i + '">');
+    s.push('<rect x="0" y="' + (y - 4) + '" width="' + W + '" height="' + ligne + '" fill="transparent"/>');
+    s.push('<text x="0" y="' + (y + hb - 2) + '" font-size="11.5" fill="var(--text-secondary)">' +
+           esc(libelle(it)) + '</text>');
+    if (w > 0) s.push('<path d="' + barreH(largeurLib, y, w, hb) + '" fill="var(--series-1)"/>');
+    s.push('<text x="' + (largeurLib + w + 7) + '" y="' + (y + hb - 2) + '" font-size="11.5" ' +
+           'fill="var(--text-primary)" style="font-variant-numeric:tabular-nums">' +
+           n(valeur(it)) + '</text>');
+    s.push('</g>');
+  });
+  s.push('</svg>');
+  return s.join('');
+}
+
+/* -------------------------------------------------------------- rendu */
+function rendre() {
+  var r = document.getElementById('racine');
+
+  if (!D.matriculesDistincts) {
+    r.innerHTML =
+      '<div class="vide"><div class="gros">Aucun matricule enregistré pour l\'instant.</div>' +
+      'Lance <b>Cherche MG &rsaquo; Lancer le balayage complet</b> : environ 26 requêtes, ' +
+      'un peu plus d\'une minute.</div>';
+    return;
+  }
+
+  var b = D.balayage || {};
+  var faites = (b.lettresFaites || []).length;
+  var restantes = (b.lettresRestantes || []).length;
+  var totalL = faites + restantes;
+  var avance = totalL ? Math.round(faites / totalL * 100) : 100;
+  var etat = !totalL ? 'jamais lancé'
+           : b.suspendu ? 'suspendu — relance mgBalayage()'
+           : b.enCours ? 'en cours' : 'terminé';
+
+  var h = [];
+
+  /* entête : un seul chiffre héros, et le compteur d'avancement */
+  h.push('<div class="entete">');
+  h.push('<div><div class="hero-label">Matricules distincts enregistrés</div>' +
+         '<div class="hero-value">' + n(D.matriculesDistincts) + '</div>' +
+         '<div class="hero-sub">de MG ' + n(D.plage.min) + ' à MG ' + n(D.plage.max) +
+         ' &middot; source cherchemg.fr</div></div>');
+  h.push('<div class="compteur"><div class="compteur-tete"><span>Balayage de l\'index</span>' +
+         '<span><b>' + faites + '</b> / ' + totalL + ' lettres</span></div>' +
+         '<div class="piste"><div class="remplissage" style="width:' + avance + '%"></div></div>' +
+         '<div class="compteur-note">' + esc(etat) + '</div></div>');
+  h.push('</div>');
+
+  /* tuiles : les nombres qui n'ont pas besoin d'un graphique */
+  h.push('<div class="kpi">');
+  h.push(tuile('Lignes d\'index', n(D.lignesIndex), 'matricule × identité × source'));
+  h.push(tuile('Engagés distincts', n(D.engagesDistincts),
+               nf2.format(D.engagesDistincts / D.matriculesDistincts) + ' par matricule'));
+  h.push(tuile('Identités sans numéro', n(D.identitesSansNumero), 'relevées, matricule inconnu'));
+  h.push(tuile('Fiches détaillées', n(D.lignesFiches),
+               D.lignesFiches ? 'phase 2' : 'phase 2 non lancée'));
+  h.push('</div>');
+
+  /* histogramme */
+  var hist = histogramme(D.tranches, D.tailleTranche);
+  h.push('<div class="carte"><h2>Matricules par tranche de ' + n(D.tailleTranche) + '</h2>' +
+         '<p class="sous">Nombre de numéros distincts présents dans chaque tranche ' +
+         '(maximum possible : ' + n(D.tailleTranche) + ' par tranche).</p>' + hist.html + '</div>');
+
+  /* deux cartes côte à côte */
+  h.push('<div class="grille2">');
+
+  h.push('<div class="carte"><h2>Séries de numérotation</h2>' +
+         '<p class="sous">En dessous de ' + n(D.seuilSerie) + ', plusieurs séries ont coexisté : ' +
+         'un même numéro peut porter des engagés sans rapport.</p>' +
+         '<ul class="legende">' +
+         '<li><span class="pastille" style="background:var(--series-1)"></span>' +
+         'Série principale <b>' + n(D.seriePrincipale) + '</b> (' + pct(D.seriePrincipale, D.matriculesDistincts) + ' %)</li>' +
+         '<li><span class="pastille" style="background:var(--series-2)"></span>' +
+         'Série ambiguë <b>' + n(D.serieAmbigue) + '</b> (' + pct(D.serieAmbigue, D.matriculesDistincts) + ' %)</li>' +
+         '</ul>' + partATout(D.seriePrincipale, D.serieAmbigue, D.matriculesDistincts) + '</div>');
+
+  h.push('<div class="carte"><h2>Engagés par matricule</h2>' +
+         '<p class="sous">Combien de personnes distinctes portent le même numéro.</p>' +
+         barres(D.distribution, libelleEngages, function (d) { return d.n; }, LARGEUR_DEMI) + '</div>');
+
+  h.push('</div>');
+
+  /* releveurs : seulement si la phase 2 a produit quelque chose */
+  if (D.releveurs && D.releveurs.length) {
+    h.push('<div class="carte"><h2>Principaux releveurs</h2>' +
+           '<p class="sous">Propriétaires des données relevées, d\'après les fiches récupérées.</p>' +
+           barres(D.releveurs, function (x) { return x.nom; }, function (x) { return x.n; },
+                  LARGEUR_PLEINE) + '</div>');
+  }
+
+  /* bascule + jumeau tableau : toute valeur reste lisible sans survol */
+  h.push('<div class="barre-outils"><button class="bouton" id="bascule">Voir le tableau</button>' +
+         '<span class="pied">Généré le ' + esc(D.genere_le) + '</span></div>');
+  h.push('<div id="tableau" hidden>' + tableaux() + '</div>');
+  h.push('<p class="pied">Relevés bénévoles de cherchemg.fr, propriété de leurs contributeurs et ' +
+         'releveurs. <a href="' + esc(D.classeur) + '">Ouvrir le classeur</a></p>');
+
+  r.innerHTML = h.join('');
+  brancherSurvols();
+
+  var bt = document.getElementById('bascule');
+  bt.addEventListener('click', function () {
+    var t = document.getElementById('tableau');
+    t.hidden = !t.hidden;
+    bt.textContent = t.hidden ? 'Voir le tableau' : 'Masquer le tableau';
+  });
+}
+
+function tuile(label, valeur, note) {
+  return '<div class="tuile"><div class="tuile-label">' + label + '</div>' +
+         '<div class="tuile-valeur">' + valeur + '</div>' +
+         '<div class="tuile-note">' + note + '</div></div>';
+}
+
+/** Jumeau tableau : chaque graphique a son équivalent chiffré. */
+function tableaux() {
+  var t = ['<table class="donnees"><caption>Matricules par tranche</caption>' +
+           '<tr><th>Tranche</th><th class="n">Matricules</th><th class="n">Couverture</th></tr>'];
+  D.tranches.forEach(function (x) {
+    t.push('<tr><td>' + n(x.debut) + ' – ' + n(x.fin) + '</td><td class="n">' + n(x.n) +
+           '</td><td class="n">' + pct(x.n, D.tailleTranche) + ' %</td></tr>');
+  });
+  t.push('</table>');
+
+  t.push('<table class="donnees"><caption>Engagés par matricule</caption>' +
+         '<tr><th>Engagés</th><th class="n">Matricules</th></tr>');
+  D.distribution.forEach(function (x) {
+    t.push('<tr><td>' + esc(libelleEngages(x)) + '</td><td class="n">' + n(x.n) + '</td></tr>');
+  });
+  t.push('</table>');
+
+  if (D.releveurs && D.releveurs.length) {
+    t.push('<table class="donnees"><caption>Principaux releveurs</caption>' +
+           '<tr><th>Releveur</th><th class="n">Lignes de fiche</th></tr>');
+    D.releveurs.forEach(function (x) {
+      t.push('<tr><td>' + esc(x.nom) + '</td><td class="n">' + n(x.n) + '</td></tr>');
+    });
+    t.push('</table>');
+  }
+  return t.join('');
+}
+
+function brancherSurvols() {
+  document.querySelectorAll('.bande').forEach(function (g) {
+    var t = D.tranches[+g.dataset.i];
+    surMarque(g, '<span class="v">' + n(t.n) + '</span> matricules<br>' +
+                 '<span class="s">MG ' + n(t.debut) + ' – ' + n(t.fin) + ' &middot; ' +
+                 pct(t.n, D.tailleTranche) + ' % de la tranche</span>');
+  });
+  document.querySelectorAll('.seg').forEach(function (g) {
+    var principale = g.dataset.k === 'p';
+    var v = principale ? D.seriePrincipale : D.serieAmbigue;
+    surMarque(g, '<span class="v">' + n(v) + '</span> ' +
+                 (principale ? 'en série principale' : 'en série ambiguë') + '<br>' +
+                 '<span class="s">' + (principale ? '≥ ' : '< ') + n(D.seuilSerie) + '</span>');
+  });
+  document.querySelectorAll('.carte').forEach(function (carte) {
+    var estReleveurs = /releveurs/i.test(carte.querySelector('h2').textContent);
+    var source = estReleveurs ? D.releveurs : D.distribution;
+    carte.querySelectorAll('.rang').forEach(function (g) {
+      var it = source[+g.dataset.i];
+      if (!it) return;
+      surMarque(g, '<span class="v">' + n(it.n) + '</span> ' +
+                   (estReleveurs ? 'lignes relevées' : 'matricules') + '<br>' +
+                   '<span class="s">' + esc(estReleveurs ? it.nom : libelleEngages(it)) + '</span>');
+    });
+  });
+}
+
+rendre();
+</script>
+</body>
+</html>
