@@ -129,18 +129,33 @@ function mgTopReleveurs_(shFiches) {
 /* ------------------------------------------------------------ tableau de bord */
 
 /**
- * Ouvre le tableau de bord.
+ * Page du tableau de bord, prete a etre affichee.
+ * Separee de l'ouverture : la MEME page sert la fenetre modale (script lie a
+ * un classeur) et l'application web (script autonome).
  * Necessite un fichier HTML nomme "Vue" dans le projet Apps Script.
  */
-function mgAfficherTableauDeBord() {
+function mgPageTableauDeBord() {
   var modele = HtmlService.createTemplateFromFile('Vue');
 
   // Injecte en JSON. On neutralise '<' : une valeur contenant "</script>"
   // fermerait la balise et casserait la page.
   modele.donnees = JSON.stringify(mgStatistiques()).replace(/</g, '\\u003c');
 
-  SpreadsheetApp.getUi().showModalDialog(
-    modele.evaluate().setWidth(940).setHeight(720),
+  return modele.evaluate();
+}
+
+/**
+ * Ouvre le tableau de bord dans une fenetre modale du classeur.
+ *
+ * ATTENTION : ne marche QUE depuis un script lie a un classeur. Dans un script
+ * autonome, SpreadsheetApp.getUi() n'existe pas ("Cannot call
+ * SpreadsheetApp.getUi() from this context") : passe alors par l'application
+ * web, qui sert exactement la meme page (voir mgUiOuEchouer_).
+ */
+function mgAfficherTableauDeBord() {
+  var ui = mgUiOuEchouer_('le tableau de bord', 'tableau');
+  ui.showModalDialog(
+    mgPageTableauDeBord().setWidth(940).setHeight(720),
     'Cherche MG - chiffres cles'
   );
 }

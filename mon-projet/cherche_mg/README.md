@@ -105,13 +105,32 @@ export direct — vaut mieux que 26 requêtes de 6 Mo.
 
 ## 3. Installation
 
-1. Nouveau projet Apps Script → créer `Config.gs`, `Parser.gs`, `Client.gs`,
-   `Api.gs`, `Stats.gs`, plus un **fichier HTML nommé `Vue`** (*Fichier ›
-   Nouveau › Fichier HTML*, coller `Vue.html`). Ou `clasp push` depuis ce
-   dossier. Sans le fichier `Vue`, tout marche sauf le tableau de bord.
+1. Nouveau projet Apps Script → créer les scripts `Config.gs`, `Parser.gs`,
+   `Client.gs`, `Api.gs`, `Stats.gs`, `Engages.gs`, plus **deux fichiers HTML**
+   nommés `Vue` et `Recherche` (*Fichier › Nouveau › Fichier HTML*). Ou
+   `clasp push` depuis ce dossier. Sans `Vue`, tout marche sauf le tableau de
+   bord ; sans `Recherche`, tout marche sauf l'écran de recherche.
 2. Lier ou créer un classeur : au premier appel, `mgClasseur_()` utilise le
    classeur actif ; si le script est autonome, il en **crée un** et journalise
    son URL. Pour en imposer un : `mgDefinirClasseur('<ID du classeur>')`.
+
+> **Script lié ou script autonome — ça change ce qui marche.**
+> `SpreadsheetApp.getUi()` n'existe que dans un script **attaché à un classeur**.
+> Dans un script autonome, le menu « Cherche MG » n'apparaît jamais et les
+> fenêtres modales lèvent *« Cannot call SpreadsheetApp.getUi() from this
+> context »*. Le moissonnage, lui, fonctionne dans les deux cas.
+>
+> | | Script lié (Extensions › Apps Script depuis le classeur) | Script autonome |
+> |---|---|---|
+> | Balayage, fiches, import, API JSON | oui | oui |
+> | Menu + fenêtres modales | oui | **non** |
+> | Écrans en application web | oui | oui |
+>
+> Pour **lier** : ouvre le classeur → *Extensions › Apps Script* → colle les
+> fichiers dans ce projet-là.
+> Pour rester **autonome** : déploie en application web et ouvre
+> `…/exec?action=tableau` ou `…/exec?action=recherche` — ce sont exactement les
+> mêmes pages que les fenêtres modales.
 3. Autorisations demandées au premier lancement : `UrlFetch`, `Spreadsheets`,
    `ScriptApp` (déclencheurs).
 4. Web app (facultatif) : *Déployer > Nouveau déploiement > Application Web*,
@@ -191,6 +210,48 @@ mgPatro('kichenin');  // recherche par identité
 mgResume();           // chiffres clés à plat (API, logs)
 ```
 
+### Consulter et chercher les engagés — menu « Rechercher un engagé… »
+
+Les matricules ne servent à rien s'ils restent dans une feuille. `Engages.gs` +
+`Recherche.html` ajoutent l'écran qui manquait : un tableau filtrable sur la
+feuille **`MG_Engages`**.
+
+**1. Importer les données.** Deux voies au choix :
+
+- *Sheets natif* — Fichier › Importer › (ton CSV) › **Insérer une nouvelle
+  feuille**, puis renomme l'onglet en `MG_Engages`. Zéro code.
+- *Depuis le script* — dépose le CSV sur ton Drive, puis menu **Importer un CSV
+  d'engagés…**, ou `mgImporterEngages('engages.csv')` dans l'éditeur.
+
+**2. Chercher.** Menu **Rechercher un engagé…** ouvre l'écran :
+
+| Filtre | Comportement |
+|---|---|
+| Recherche | tous les mots doivent être présents, répartis sur identité, notes, sources, origine, convoi, contributeur |
+| MG de / à | plage de matricules |
+| Année de / à | comparée à naissance, sinon arrivée, sinon immatriculation |
+| Origine | **préfixe** : « Inde » attrape aussi « Inde \| Calcutta » |
+| Contributeur | valeur exacte |
+
+La recherche est **insensible aux accents et à la casse** : `petan` trouve
+« Pétan », `geole` trouve « géôle ». Ça compte — les relevés d'époque en sont
+pleins et personne ne les tape.
+
+Chaque matricule renvoie vers sa fiche sur cherchemg.fr. Un `?` signale les
+numéros sous 11 000, où plusieurs séries ont coexisté. Le bouton **Envoyer vers
+une feuille** écrit *tous* les résultats (pas seulement la page affichée) dans
+`MG_Recherche`, pour trier et partager ensuite.
+
+**Schéma libre.** Les colonnes sont reconnues par leur **nom**, lu dans la ligne
+d'en-tête — jamais par leur position. Le même écran accepte donc `engages.csv`
+(10 colonnes), `moissonneur/mg_fiches.csv` (15 colonnes), ou un export de
+`MG_Fiches`. Une colonne absente est ignorée, une colonne inconnue est affichée
+quand même. Rien à reparamétrer quand la source change.
+
+> Le filtrage se fait côté serveur, sur toute la feuille : compter 1 à 3 s par
+> recherche sur 27 000 lignes. C'est pourquoi elle part sur **Entrée** ou sur le
+> bouton, jamais à chaque frappe.
+
 ### Tableau de bord — menu « Chiffres clés »
 
 `mgAfficherTableauDeBord()` ouvre `Vue.html` en fenêtre modale :
@@ -264,12 +325,19 @@ Hors ligne, sans réseau, sur des pages réelles enregistrées dans
 node test/test_parser.cjs      # 51 assertions : parsing des 2 pages
 node test/test_balayage.cjs    # 47 assertions : dédup, idempotence, reprise,
                                #                 suspension, et statistiques
+node test/test_engages.cjs     # 49 assertions : import, recherche, filtres,
+                               #                 pagination, export, script autonome
 ```
 
 `test_balayage.cjs` remplace Apps Script par de faux services (Sheets,
 Properties, Cache, UrlFetch, déclencheurs) et rejoue le balayage complet. Le
 faux Sheets reproduit volontairement la contrainte qui casse en vrai : écrire
 au-delà de `getMaxRows()` lève « range exceeds grid limits ».
+
+`test_engages.cjs` tourne sur le **vrai** `engages.csv` s'il est présent
+(27 096 lignes), sinon sur un extrait de synthèse. Les deux exercent le champ
+`notes` contenant une virgule entre guillemets — celui qui casse un découpage
+naïf — et vérifient que chercher `petan` trouve bien « Pétan ».
 
 Si le site change sa mise en page, ces tests le disent avant le déploiement.
 Pour vérifier en direct : `mgTestStructure()` dans l'éditeur Apps Script.

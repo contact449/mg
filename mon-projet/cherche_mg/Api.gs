@@ -23,13 +23,15 @@
 /* ---------------------------------------------------------------- endpoint */
 
 /**
+ *  GET .../exec?action=tableau                 <- le tableau de bord (HTML)
+ *  GET .../exec?action=recherche               <- l ecran de recherche (HTML)
  *  GET .../exec?action=fiche&mg=11000
  *  GET .../exec?action=patro&q=moutou&max=200
  *  GET .../exec?action=liste&page=1&taille=1000
  *  GET .../exec?action=etat
  *
  *  Params :
- *    action = fiche | patro | liste | etat        (defaut : fiche)
+ *    action = tableau | recherche | fiche | patro | liste | etat  (defaut : fiche)
  *    mg     = numero de matricule (1..130000)     [action=fiche]
  *    q      = chaine recherchee dans l'identite   [action=patro]
  *    max    = plafond de lignes renvoyees         [action=patro]
@@ -44,6 +46,15 @@ function mgDoGet(e) {
     }
 
     switch (p.action || 'fiche') {
+
+      // Les deux ecrans, servis en HTML : c'est la voie qui marche meme quand
+      // le script est autonome et n'a donc aucune interface de classeur.
+      case 'tableau':
+        return mgPageWeb_(mgPageTableauDeBord(), 'Cherche MG - chiffres cles');
+
+      case 'recherche':
+        return mgPageWeb_(HtmlService.createHtmlOutputFromFile('Recherche'),
+                          'Cherche MG - recherche d\'engages');
 
       case 'fiche':
         return mgJson_(mgLookup(p.mg || p.numero || p.MgChaine,
@@ -73,6 +84,45 @@ function doGet(e) { return mgDoGet(e); }
 function mgJson_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ------------------------------------------------- interface utilisateur -- */
+
+/**
+ * L'interface du classeur, ou null si le script n'est pas lie a un classeur.
+ *
+ * SpreadsheetApp.getUi() n'existe QUE dans un script attache a un fichier
+ * ouvert. Dans un script autonome - celui que mgClasseur_() alimente en creant
+ * un classeur - l'appel leve "Cannot call SpreadsheetApp.getUi() from this
+ * context". On teste au lieu de laisser passer l'exception brute.
+ */
+function mgUi_() {
+  try { return SpreadsheetApp.getUi(); } catch (e) { return null; }
+}
+
+/**
+ * Comme mgUi_(), mais explique quoi faire au lieu d'un message Google opaque.
+ * @param {string} quoi    ce qu'on voulait ouvrir, pour le message
+ * @param {string} action  la route web equivalente (?action=...)
+ */
+function mgUiOuEchouer_(quoi, action) {
+  var ui = mgUi_();
+  if (ui) return ui;
+  throw new Error(
+    'Impossible d\'ouvrir ' + quoi + ' ici : ce script n\'est pas lie a un classeur.\n\n' +
+    'Deux solutions :\n' +
+    '  1) Lier le script au classeur - ouvre le classeur, Extensions > Apps Script, ' +
+    'et colle les fichiers dans CE projet. Le menu et les fenetres marcheront.\n' +
+    '  2) Deployer en application web (Deployer > Nouveau deploiement > Application ' +
+    'Web) et ouvrir  <url>/exec?action=' + action + '  : c\'est la meme page.\n\n' +
+    'Le classeur des donnees : ' + mgClasseur_().getUrl());
+}
+
+/** Page HTML servie par l'application web (titre + viewport poses une fois). */
+function mgPageWeb_(sortie, titre) {
+  return sortie
+    .setTitle(titre)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 /* ------------------------------------------------------ lecture de la base */
@@ -139,7 +189,9 @@ function mgResume() {
 function onOpen() { mgInstallerMenu_(); }
 
 function mgInstallerMenu_() {
-  SpreadsheetApp.getUi()
+  var ui = mgUi_();
+  if (!ui) return;            // script autonome : pas de menu, pas d erreur
+  ui
     .createMenu('Cherche MG')
     .addItem('1. Lancer le balayage complet', 'mgMenuBalayage_')
     .addItem('Voir l\'avancement', 'mgMenuEtat_')
@@ -147,13 +199,16 @@ function mgInstallerMenu_() {
     .addSeparator()
     .addItem('2. Completer les fiches (serie >= 11000)', 'mgMenuFiches_')
     .addSeparator()
-    .addItem('Chercher un numero de MG...', 'mgMenuRecherche_')
+    .addItem('Rechercher un engage...', 'mgOuvrirRecherche')
+    .addItem('Importer un CSV d\'engages...', 'mgMenuImporterEngages_')
+    .addSeparator()
+    .addItem('Chercher un numero de MG (en ligne)...', 'mgMenuRecherche_')
     .addItem('Chiffres cles', 'mgAfficherTableauDeBord')
     .addToUi();
 }
 
 function mgMenuBalayage_() {
-  var ui = SpreadsheetApp.getUi();
+  var ui = mgUiOuEchouer_('cette fenetre', 'etat');
   var rep = ui.alert(
     'Balayage complet',
     'Environ ' + MG_ALPHABET.length + ' requetes vers cherchemg.fr, une par lettre.\n' +
@@ -169,9 +224,10 @@ function mgMenuBalayage_() {
 }
 
 function mgMenuEtat_() {
+  var ui = mgUiOuEchouer_('cette fenetre', 'etat');
   var e = mgEtatBalayage();
   if (e.enCours === false && !e.lettresFaites) {
-    SpreadsheetApp.getUi().alert('Balayage jamais lance.');
+    ui.alert('Balayage jamais lance.');
     return;
   }
   var faites = (e.lettresFaites || []).length;
@@ -180,7 +236,7 @@ function mgMenuEtat_() {
            : e.enCours  ? 'en cours'
            : 'termine';
 
-  SpreadsheetApp.getUi().alert(
+  ui.alert(
     'Balayage : ' + etat + '\n\n' +
     faites + ' lettres traitees, ' + reste + ' restantes\n' +
     (e.lettresRestantes || []).join(' ') + '\n\n' +
@@ -199,7 +255,7 @@ function mgFormaterNombre_(v) {
 }
 
 function mgMenuFiches_() {
-  var ui = SpreadsheetApp.getUi();
+  var ui = mgUiOuEchouer_('cette fenetre', 'etat');
   var rep = ui.alert(
     'Completer les fiches',
     'Une requete par numero, ~6 s chacune cote site.\n' +
@@ -213,7 +269,7 @@ function mgMenuFiches_() {
 }
 
 function mgMenuRecherche_() {
-  var ui = SpreadsheetApp.getUi();
+  var ui = mgUiOuEchouer_('cette fenetre', 'fiche');
   var rep = ui.prompt('Numero de Matricule Generale', 'Entre un numero (1 a 130000) :',
                       ui.ButtonSet.OK_CANCEL);
   if (rep.getSelectedButton() !== ui.Button.OK) return;

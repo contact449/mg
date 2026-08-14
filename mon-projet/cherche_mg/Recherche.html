@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+/* Mêmes rôles de couleur que Vue.html : une seule peau pour tout le module. */
+:root {
+  color-scheme: light;
+  --surface-1:#fcfcfb; --plane:#f9f9f7; --text-primary:#0b0b0b;
+  --text-secondary:#52514e; --text-muted:#898781; --gridline:#e1e0d9;
+  --border:rgba(11,11,11,.10); --s1:#2a78d6; --champ:#ffffff;
+}
+/* Le sombre est déclaré DEUX fois : la requête média couvre le réglage
+   système, le sélecteur data-theme couvre une bascule explicite. Sans le
+   second, un thème sombre imposé par l'hôte laisserait la page en clair. */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1:#1a1a19; --plane:#0d0d0d; --text-primary:#fff;
+    --text-secondary:#c3c2b7; --text-muted:#898781; --gridline:#2c2c2a;
+    --border:rgba(255,255,255,.10); --s1:#3987e5; --champ:#111110;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1:#1a1a19; --plane:#0d0d0d; --text-primary:#fff;
+  --text-secondary:#c3c2b7; --text-muted:#898781; --gridline:#2c2c2a;
+  --border:rgba(255,255,255,.10); --s1:#3987e5; --champ:#111110;
+}
+* { box-sizing:border-box; }
+html { background:var(--plane); }
+html, body { margin:0; height:100%; }
+body {
+  background:var(--plane); color:var(--text-primary);
+  font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
+  display:flex; flex-direction:column;
+}
+
+/* ------------------------------------------------------------- filtres --- */
+/* Une seule rangée au-dessus de tout ce qu'elle filtre. */
+.filtres {
+  display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end;
+  padding:12px 14px; border-bottom:1px solid var(--border); background:var(--surface-1);
+}
+.champ { display:flex; flex-direction:column; gap:3px; }
+.champ label { font-size:11px; color:var(--text-secondary); }
+input, select {
+  font:inherit; font-size:12.5px; color:var(--text-primary); background:var(--champ);
+  border:1px solid var(--border); border-radius:7px; padding:5px 8px; min-width:0;
+}
+input:focus, select:focus { outline:2px solid var(--s1); outline-offset:-1px; }
+#texte { width:230px; }
+.mini { width:78px; }
+.moyen { width:150px; }
+button {
+  font:inherit; font-size:12.5px; border-radius:7px; padding:6px 13px; cursor:pointer;
+  border:1px solid var(--border); background:var(--surface-1); color:var(--text-primary);
+}
+button:hover { background:var(--plane); }
+button.primaire { background:var(--s1); border-color:var(--s1); color:#fff; }
+button.primaire:hover { filter:brightness(1.08); }
+button[disabled] { opacity:.5; cursor:default; }
+
+/* --------------------------------------------------------------- état ---- */
+.etat {
+  display:flex; justify-content:space-between; align-items:center; gap:12px;
+  padding:8px 14px; font-size:12px; color:var(--text-secondary);
+  border-bottom:1px solid var(--border);
+}
+.etat b { color:var(--text-primary); font-variant-numeric:tabular-nums; }
+
+/* ------------------------------------------------------------ résultats -- */
+/* Le tableau défile dans SON conteneur : la page, elle, ne bouge pas. */
+.zone { flex:1; overflow:auto; }
+table { border-collapse:collapse; font-size:12px; width:100%; }
+thead th {
+  position:sticky; top:0; z-index:1; background:var(--surface-1);
+  text-align:left; font-weight:500; color:var(--text-secondary);
+  padding:7px 9px; border-bottom:1px solid var(--gridline); white-space:nowrap;
+}
+tbody td {
+  padding:6px 9px; border-bottom:1px solid var(--gridline);
+  vertical-align:top; max-width:340px;
+}
+tbody tr:hover { background:var(--surface-1); }
+td.mg { font-variant-numeric:tabular-nums; white-space:nowrap; }
+td.mg a { color:var(--s1); text-decoration:none; font-weight:600; }
+td.mg a:hover { text-decoration:underline; }
+.coupe { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ambigu {
+  font-size:10px; color:var(--text-muted); border:1px solid var(--border);
+  border-radius:4px; padding:0 4px; margin-left:5px; vertical-align:1px;
+}
+
+/* ------------------------------------------------------------ pied ------- */
+.pied {
+  display:flex; justify-content:space-between; align-items:center; gap:12px;
+  padding:9px 14px; border-top:1px solid var(--border); background:var(--surface-1);
+  font-size:12px; color:var(--text-secondary);
+}
+.pages { display:flex; align-items:center; gap:8px; }
+.message { padding:40px 20px; text-align:center; color:var(--text-secondary); }
+.message .gros { font-size:15px; color:var(--text-primary); margin-bottom:8px; }
+.message code {
+  background:var(--surface-1); border:1px solid var(--border);
+  border-radius:5px; padding:1px 5px; font-size:12px;
+}
+.erreur { color:#d03b3b; }
+</style>
+</head>
+<body>
+
+<div class="filtres" id="filtres" hidden>
+  <div class="champ">
+    <label for="texte">Recherche</label>
+    <input id="texte" type="search" placeholder="identité, notes, sources…" autocomplete="off">
+  </div>
+  <div class="champ">
+    <label for="matMin">MG de</label>
+    <input id="matMin" class="mini" type="number" min="1" max="130000" placeholder="1">
+  </div>
+  <div class="champ">
+    <label for="matMax">à</label>
+    <input id="matMax" class="mini" type="number" min="1" max="130000" placeholder="130000">
+  </div>
+  <div class="champ">
+    <label for="anMin">Année de</label>
+    <input id="anMin" class="mini" type="number" placeholder="1839">
+  </div>
+  <div class="champ">
+    <label for="anMax">à</label>
+    <input id="anMax" class="mini" type="number" placeholder="1911">
+  </div>
+  <div class="champ">
+    <label for="origine">Origine</label>
+    <select id="origine" class="moyen"></select>
+  </div>
+  <div class="champ">
+    <label for="contributeur">Contributeur</label>
+    <select id="contributeur" class="moyen"></select>
+  </div>
+  <button class="primaire" id="chercher">Chercher</button>
+  <button id="vider">Vider</button>
+</div>
+
+<div class="etat" id="etat" hidden>
+  <span id="resume"></span>
+  <span id="chrono"></span>
+</div>
+
+<div class="zone" id="zone">
+  <div class="message"><div class="gros">Chargement…</div></div>
+</div>
+
+<div class="pied" id="pied" hidden>
+  <span><span id="plage"></span>
+    <button id="versFeuille" style="margin-left:10px" title="Écrit TOUS les résultats de la recherche dans une feuille du classeur">Envoyer vers une feuille</button>
+  </span>
+  <span class="pages">
+    <button id="prec">‹ Précédent</button>
+    <span id="numPage"></span>
+    <button id="suiv">Suivant ›</button>
+  </span>
+</div>
+
+<script>
+var A = null;          // données d'amorçage (colonnes, listes, url de fiche)
+var page = 1;
+var dernier = null;    // dernier résultat reçu
+var enCours = false;
+
+var $ = function (id) { return document.getElementById(id); };
+var nf = new Intl.NumberFormat('fr-FR');
+function n(v) { return nf.format(v || 0); }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c];
+  });
+}
+
+/* ------------------------------------------------------------ amorçage --- */
+google.script.run
+  .withSuccessHandler(demarrer)
+  .withFailureHandler(echec)
+  .mgAmorcerRecherche();
+
+function demarrer(a) {
+  A = a;
+  $('filtres').hidden = false;
+  $('etat').hidden = false;
+
+  remplir($('origine'), a.origines, 'Toutes');
+  remplir($('contributeur'), a.contributeurs, 'Tous');
+
+  $('resume').innerHTML = '<b>' + n(a.lignes) + '</b> engagés · <b>' +
+    n(a.matriculesDistincts) + '</b> matricules · MG ' + n(a.plage.min) + ' à ' + n(a.plage.max);
+
+  $('zone').innerHTML = '<div class="message">Lance une recherche, ou clique sur ' +
+    '<b>Chercher</b> pour tout parcourir.</div>';
+
+  chercher();          // premier écran : les premiers matricules
+}
+
+function remplir(sel, valeurs, libelleTout) {
+  var h = ['<option value="">' + libelleTout + '</option>'];
+  for (var i = 0; i < valeurs.length; i++) {
+    h.push('<option value="' + esc(valeurs[i].valeur) + '">' +
+           esc(valeurs[i].valeur) + ' (' + n(valeurs[i].n) + ')</option>');
+  }
+  sel.innerHTML = h.join('');
+}
+
+function echec(e) {
+  var msg = (e && e.message) ? e.message : String(e);
+  $('zone').innerHTML = '<div class="message"><div class="gros erreur">Impossible de lire les engagés.</div>' +
+    '<pre style="white-space:pre-wrap;text-align:left;display:inline-block;max-width:640px">' +
+    esc(msg) + '</pre></div>';
+  $('etat').hidden = true;
+  $('pied').hidden = true;
+}
+
+/* ----------------------------------------------------------- recherche --- */
+function criteres() {
+  return {
+    texte: $('texte').value,
+    matriculeMin: $('matMin').value,
+    matriculeMax: $('matMax').value,
+    anneeMin: $('anMin').value,
+    anneeMax: $('anMax').value,
+    origine: $('origine').value,
+    contributeur: $('contributeur').value,
+    page: page
+  };
+}
+
+function chercher(nouvellePage) {
+  if (enCours) return;
+  if (!nouvellePage) page = 1;
+  enCours = true;
+  $('chercher').disabled = true;
+  $('chrono').textContent = 'Recherche…';
+
+  google.script.run
+    .withSuccessHandler(afficher)
+    .withFailureHandler(function (e) { enCours = false; $('chercher').disabled = false; echec(e); })
+    .mgRechercherEngages(criteres());
+}
+
+function afficher(r) {
+  enCours = false;
+  dernier = r;
+  $('chercher').disabled = false;
+  $('chrono').textContent = n(r.total) + ' résultat' + (r.total > 1 ? 's' : '') +
+                            ' en ' + (r.duree_ms / 1000).toFixed(1) + ' s';
+
+  if (!r.total) {
+    $('zone').innerHTML = '<div class="message"><div class="gros">Aucun résultat.</div>' +
+      'Élargis la recherche : moins de mots, ou une plage de matricules plus large.</div>';
+    $('pied').hidden = true;
+    return;
+  }
+
+  var cols = r.colonnes;
+  var h = ['<table><thead><tr>'];
+  for (var c = 0; c < cols.length; c++) {
+    h.push('<th style="min-width:' + cols[c].largeur + 'px">' + esc(cols[c].titre) + '</th>');
+  }
+  h.push('</tr></thead><tbody>');
+
+  for (var i = 0; i < r.lignes.length; i++) {
+    var l = r.lignes[i];
+    h.push('<tr>');
+    for (var j = 0; j < cols.length; j++) {
+      var v = l[cols[j].index];
+      if (cols[j].type === 'nombre') {
+        // Le matricule renvoie vers sa fiche sur le site, source des données.
+        var mg = String(v || '').replace(/\D/g, '');
+        h.push('<td class="mg"><a href="' + A.urlFiche + mg + '" target="_blank" rel="noopener">' +
+               esc(v) + '</a>' +
+               (mg && Number(mg) < 11000 ? '<span class="ambigu" title="Sous 11 000, plusieurs séries de numéros ont coexisté : un même numéro peut porter des engagés sans rapport">?</span>' : '') +
+               '</td>');
+      } else {
+        // Une date inconnue est notee 0000-00-00 par le site : l'afficher
+        // n'apprend rien et encombre la colonne. Elle reste dans la feuille.
+        if (cols[j].type === 'date' && /^0{4}-0{2}-0{2}$/.test(String(v || '').trim())) v = '';
+        // Titre complet au survol : rien n'est perdu, même tronqué.
+        h.push('<td><span class="coupe" title="' + esc(v) + '">' + esc(v) + '</span></td>');
+      }
+    }
+    h.push('</tr>');
+  }
+  h.push('</tbody></table>');
+  $('zone').innerHTML = h.join('');
+  $('zone').scrollTop = 0;
+
+  var debut = (r.page - 1) * r.taille + 1;
+  var fin = Math.min(r.page * r.taille, r.total);
+  $('plage').textContent = debut + ' – ' + fin + ' sur ' + n(r.total);
+  $('numPage').textContent = 'page ' + r.page + ' / ' + r.pages;
+  $('prec').disabled = r.page <= 1;
+  $('suiv').disabled = r.page >= r.pages;
+  $('pied').hidden = false;
+}
+
+/* ------------------------------------------------------------- actions --- */
+$('chercher').addEventListener('click', function () { chercher(); });
+$('vider').addEventListener('click', function () {
+  ['texte', 'matMin', 'matMax', 'anMin', 'anMax'].forEach(function (id) { $(id).value = ''; });
+  $('origine').value = ''; $('contributeur').value = '';
+  chercher();
+});
+$('origine').addEventListener('change', function () { chercher(); });
+$('contributeur').addEventListener('change', function () { chercher(); });
+
+// Entrée déclenche la recherche ; pas de recherche à chaque frappe, un aller-
+// retour serveur coûte 1 à 3 s sur 27 000 lignes.
+['texte', 'matMin', 'matMax', 'anMin', 'anMax'].forEach(function (id) {
+  $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') chercher(); });
+});
+
+$('prec').addEventListener('click', function () { if (page > 1) { page--; chercher(true); } });
+$('suiv').addEventListener('click', function () {
+  if (dernier && page < dernier.pages) { page++; chercher(true); }
+});
+
+$('versFeuille').addEventListener('click', function () {
+  if (enCours) return;
+  var b = $('versFeuille');
+  b.disabled = true; b.textContent = 'Écriture…';
+  google.script.run
+    .withSuccessHandler(function (cr) {
+      b.disabled = false; b.textContent = 'Envoyer vers une feuille';
+      $('chrono').textContent = cr.lignes + ' lignes écrites dans « ' + cr.feuille + ' »';
+    })
+    .withFailureHandler(function (e) {
+      b.disabled = false; b.textContent = 'Envoyer vers une feuille';
+      echec(e);
+    })
+    .mgExporterRecherche(criteres());
+});
+</script>
+</body>
+</html>
