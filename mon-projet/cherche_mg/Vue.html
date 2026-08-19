@@ -72,6 +72,8 @@ body { background: var(--plane); }
   gap: 24px; flex-wrap: wrap; margin-bottom: 18px;
 }
 .hero-label { font-size: 12px; color: var(--text-secondary); }
+.badge-dev{display:inline-block;background:#f59e0b;color:#1f1300;font-weight:700;font-size:10.5px;letter-spacing:.06em;padding:2px 7px;border-radius:4px;margin-right:8px;vertical-align:2px}
+
 .hero-value {
   font-size: 52px; font-weight: 600; line-height: 1.05; letter-spacing: -0.02em;
   margin: 2px 0 3px;                     /* chiffres proportionnels : pas de tabular-nums */
@@ -342,7 +344,7 @@ function rendre() {
 
   /* entête : un seul chiffre héros, et le compteur d'avancement */
   h.push('<div class="entete">');
-  h.push('<div><div class="hero-label">Matricules distincts enregistrés</div>' +
+  h.push('<div><div class="hero-label">' + (D.env === 'prod' ? '' : '<span class="badge-dev">DEV</span>') + 'Matricules distincts enregistrés</div>' +
          '<div class="hero-value">' + n(D.matriculesDistincts) + '</div>' +
          '<div class="hero-sub">de MG ' + n(D.plage.min) + ' à MG ' + n(D.plage.max) +
          ' &middot; source cherchemg.fr</div></div>');

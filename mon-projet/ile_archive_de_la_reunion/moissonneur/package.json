@@ -3,9 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "description": "Récolte des actes IDLR (iledelareunion-archive.com) en CSV",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node harvest.cjs",
-    "test": "node harvest.cjs --selftest"
+    "refresh": "node harvest.cjs --refresh",
+    "import": "node importer.cjs",
+    "search": "node search.cjs",
+    "dashboard": "node serve.cjs",
+    "test": "node harvest.cjs --selftest && node importer.cjs --selftest"
   }
 }

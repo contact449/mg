@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const http = require('http');
+const Env = require('./Env.js');
 
 let DatabaseSync;
 try { ({ DatabaseSync } = require('node:sqlite')); }
@@ -59,6 +60,183 @@ function search(q) {
   return { rows: rows.slice(0, PAGE), page, hasMore };
 }
 
+/**
+ * Compteurs affiches dans le formulaire.
+ *
+ * On compte dans actes.csv, PAS dans actes.db : le CSV est ce que harvest.cjs
+ * ecrit au fil de la recolte, la base n'en est qu'une copie figee au dernier
+ * importer.cjs. Afficher la base donnerait des chiffres en retard, parfois de
+ * plusieurs heures, sans que rien ne le signale.
+ *
+ *   actes       lignes de donnees du CSV
+ *   matricules  numeros DISTINCTS ; ce n'est pas le nombre d'actes matricules,
+ *               un meme matricule revenant sur la naissance, le mariage et le
+ *               deces d'une meme personne. L'infobulle donne les deux.
+ */
+const CSV = process.env.IDLR_OUT || path.join(__dirname, 'actes.csv');
+
+/**
+ * Parcourt le CSV en lecture synchrone par blocs : jamais tout le fichier en
+ * memoire (il depasse 200 Mo sur une base complete), et stats() reste
+ * synchrone comme le reste du serveur.
+ *
+ * L'analyse respecte les guillemets : le champ obs contient des virgules et
+ * des sauts de ligne, compter les retours chariot donnerait un faux total.
+ */
+/**
+ * Empreinte 64 bits d une ligne (djb2 + sdbm concatenes).
+ * On ne garde pas les lignes elles-memes : sur une base complete, 1,2 M de
+ * lignes de 200 caracteres feraient 240 Mo en memoire.
+ */
+function empreinte(champs) {
+  var s = champs.join(String.fromCharCode(1));
+  var djb2 = 5381, sdbm = 0;
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    djb2 = ((djb2 << 5) + djb2 + c) | 0;
+    sdbm = (c + (sdbm << 6) + (sdbm << 16) - sdbm) | 0;
+  }
+  return (djb2 >>> 0).toString(36) + (sdbm >>> 0).toString(36);
+}
+
+function compterCsv(chemin) {
+  const StringDecoder = require('string_decoder').StringDecoder;
+  const dec = new StringDecoder('utf8');
+  const fd = fs.openSync(chemin, 'r');
+  const buf = Buffer.allocUnsafe(1 << 20);
+
+  let champ = '', col = 0, dansGuillemets = false, guillemetEnAttente = false;
+  let entete = null, iMat = 0, iNum = -1, premiere = [], matricule = '', numero = '';
+  let champsLigne = [];
+  let lignes = 0, actesMatricules = 0;
+  const vus = new Set();          // matricules distincts
+  const vusNumero = new Set();    // photos distinctes
+  const vues = new Set();         // lignes distinctes (empreinte 64 bits)
+
+  function finChamp() {
+    if (entete === null) premiere.push(champ);
+    else { champsLigne.push(champ); if (col === iMat) matricule = champ; }
+    if (entete !== null && col === iMat) matricule = champ;
+    if (entete !== null && col === iNum) numero = champ;
+    champ = '';
+    col++;
+  }
+  function finLigne() {
+    finChamp();
+    if (entete === null) {
+      entete = premiere.map(function (h) { return h.trim(); });
+      const i = entete.indexOf('matricule');
+      iMat = i === -1 ? 0 : i;
+      iNum = entete.indexOf('numero');
+    } else {
+      lignes++;
+      // Le fichier contient des doublons PARFAITS (memes valeurs partout) :
+      // un acte remonte dans plusieurs buckets du moissonneur. On les ecarte.
+      // Attention : la cle est la ligne entiere, pas `numero` — une photo
+      // porte souvent deux personnes (les epoux d un mariage).
+      if (!vues.has(empreinte(champsLigne))) {
+        vues.add(empreinte(champsLigne));
+        const num = numero.trim();
+        if (num) vusNumero.add(num);
+        const m = matricule.trim();
+        if (m) { actesMatricules++; vus.add(m); }
+      }
+      matricule = ''; numero = ''; champsLigne = [];
+    }
+    col = 0;
+  }
+  function avaler(bloc) {
+    for (let i = 0; i < bloc.length; i++) {
+      const c = bloc[i];
+      if (guillemetEnAttente) {
+        guillemetEnAttente = false;
+        if (c === '"') { champ += '"'; continue; }
+        dansGuillemets = false;
+      }
+      if (dansGuillemets) {
+        if (c === '"') {
+          if (i + 1 < bloc.length) {
+            if (bloc[i + 1] === '"') { champ += '"'; i++; } else dansGuillemets = false;
+          } else guillemetEnAttente = true;
+        } else champ += c;
+        continue;
+      }
+      if (c === '"') { dansGuillemets = true; continue; }
+      if (c === ',') { finChamp(); continue; }
+      if (c === '\n') { finLigne(); continue; }
+      if (c === '\r') continue;              // CRLF : le \n suffit a fermer la ligne
+      champ += c;
+    }
+  }
+
+  try {
+    let lu;
+    while ((lu = fs.readSync(fd, buf, 0, buf.length, null)) > 0) avaler(dec.write(buf.subarray(0, lu)));
+    avaler(dec.end());
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (champ !== '' || col > 0) finLigne();    // derniere ligne sans saut final
+
+  return {
+    actes: vues.size,                  // releves uniques (doublons parfaits otes)
+    photos: vusNumero.size,            // une photo peut porter plusieurs personnes
+    lignes: lignes,
+    actesMatricules: actesMatricules,
+    matricules: vus.size,
+    source: 'actes.csv'
+  };
+}
+
+/** Repli quand le CSV n'est pas la : la base, en le disant. */
+function compterBase() {
+  const un = function (sql) { try { return db.prepare(sql).get().n; } catch (e) { return null; } };
+  return {
+    actes:           un('SELECT COUNT(*) AS n FROM actes'),
+    actesMatricules: un("SELECT COUNT(*) AS n FROM actes WHERE matricule <> ''"),
+    matricules:      un("SELECT COUNT(DISTINCT matricule) AS n FROM actes WHERE matricule <> ''"),
+    photos:          un("SELECT COUNT(DISTINCT numero) AS n FROM actes WHERE numero <> ''"),
+    source:          'actes.db (actes.csv absent)'
+  };
+}
+
+/**
+ * Memoire indexee sur la taille ET la date du CSV : tant que le fichier n'a
+ * pas bouge, les chiffres non plus, on ne relit rien.
+ *
+ * Quand il a bouge, on relit — sauf si la lecture precedente a coute cher. Le
+ * plancher vaut 20 fois cette duree, plafonne a 60 s : on ne passe donc jamais
+ * plus de 5 % du temps a recompter. Sur une petite base la lecture est
+ * instantanee, le plancher s'evanouit et l'affichage suit le fichier en direct ;
+ * sur 250 Mo il protege le serveur pendant une recolte.
+ *
+ * Un plancher fixe serait le pire des deux : figer une petite base pendant une
+ * minute sans raison, et rester trop court pour une grosse.
+ */
+let memo = null;
+function stats() {
+  if (!fs.existsSync(CSV)) return compterBase();
+  const st = fs.statSync(CSV);
+  const cle = st.mtimeMs + ':' + st.size;
+  if (memo && memo.cle === cle) return memo.v;
+
+  const plancher = memo ? Math.min(60000, memo.duree * 20) : 0;
+  if (memo && Date.now() - memo.t < plancher) return memo.v;
+
+  const t0 = Date.now();
+  const v = compterCsv(CSV);
+  memo = { cle: cle, v: v, t: Date.now(), duree: Date.now() - t0 };
+  return v;
+}
+
+/** 39362 -> "39 362" (espace fine insecable, U+202F). */
+const fr = (n) => {
+  if (n === null || n === undefined) return '?';
+  const s = String(n), bouts = [];
+  for (let i = s.length; i > 0; i -= 3) bouts.unshift(s.slice(Math.max(0, i - 3), i));
+  return bouts.join('\u202f');
+};
+
 const PAGEHTML = `<!doctype html><html lang=fr><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>Recherche actes IDLR</title><style>
 :root{--background:#ffffff;--foreground:#333333;--card:#ffffff;--border:#e5e7eb;--input:#e5e7eb;
@@ -96,6 +274,13 @@ th{color:var(--muted-foreground);font-weight:600;font-size:11px;text-transform:u
 tbody tr{border-bottom:1px solid var(--border)}
 tbody tr:last-child{border-bottom:0}
 tbody tr:hover{background:var(--muted)}
+/* compteurs de la base : rejetes a droite du formulaire pour qu'on ne les
+   prenne pas pour des champs de saisie */
+.compteurs{display:flex;gap:8px;margin-left:auto;align-self:center;flex-wrap:wrap}
+.compteur{display:inline-flex;align-items:baseline;gap:5px;background:var(--muted);border:1px solid var(--border);border-radius:999px;padding:6px 13px;font-size:12.5px;color:var(--muted-foreground);white-space:nowrap}
+.compteur b{color:var(--foreground);font-weight:650;font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+/* Repere d'environnement : visible sans etre criard, absent en prod. */
+.envdev{display:inline-block;background:#f59e0b;color:#1f1300;font-weight:700;font-size:10.5px;letter-spacing:.06em;padding:2px 7px;border-radius:4px;vertical-align:1px;margin-right:7px}
 .mat{display:inline-block;background:var(--accent);color:var(--accent-foreground);font-weight:600;padding:1px 9px;border-radius:999px;font-size:12px}
 .pg{display:flex;gap:8px;align-items:center;margin-top:14px}
 .pg button{background:var(--secondary);color:var(--secondary-foreground);border-color:var(--border);padding:7px 14px}
@@ -127,7 +312,7 @@ button.busy::after{content:"";position:absolute;inset:0;margin:auto;width:15px;h
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important}}
 </style></head><body><div class=wrap>
 <h1>Recherche dans les actes IDLR</h1>
-<p class=sub>Base généalogique — 1,2 M d'actes de l'Île de la Réunion</p>
+<p class=sub>__BADGE__Base généalogique de l'Île de la Réunion — relevés de l'association Arbre</p>
 <form id=f onsubmit="go(0);return false">
  <label>Nom (commence par)<input type=text name=nom id=nom autofocus></label>
  <label>Prénom (contient)<input type=text name=prenom id=prenom></label>
@@ -139,6 +324,10 @@ button.busy::after{content:"";position:absolute;inset:0;margin:auto;width:15px;h
  <label class=chk><input type=checkbox id=matonly> matriculés seulement</label>
  <button type=submit>Rechercher</button>
  <button type=button class=sec onclick="document.getElementById('f').reset()">Effacer</button>
+ <div class=compteurs>
+  <span class=compteur title="Relevés uniques de __SRC__ (doublons parfaits ôtés), portés par __PHOTOS__ photos">__ACTES__&nbsp;actes dans Archives</span>
+  <span class=compteur title="Numéros distincts, portés par __ACTESMAT__ actes — source : __SRC__">__MATS__&nbsp;matricules dans Archives</span>
+ </div>
 </form>
 <div class=meta id=meta></div>
 <div class=tablewrap id=tw><table><thead><tr>
@@ -187,14 +376,24 @@ async function go(page){
   if(!r.rows.length){tb.innerHTML=state(IC_EMPTY,'Aucun résultat','Essaie une autre orthographe, retire un critère, ou élargis la commune.');$('meta').textContent='0 résultat';$('pg').innerHTML='';return;}
   tb.innerHTML=r.rows.map(row).join('');
   if(!reduce)tb.animate([{opacity:0,transform:'translateY(4px)'},{opacity:1,transform:'none'}],{duration:220,easing:'cubic-bezier(.22,.7,.24,1)'});
-  $('meta').innerHTML='<b>'+r.rows.length+'</b> résultat'+(r.rows.length>1?'s':'')+(r.hasMore?' · page '+(page+1)+' — d\\'autres existent, affine ou continue':(page>0?' · page '+(page+1):''));
+  history.replaceState(null,'','?'+qs(page));
+ $('meta').innerHTML='<b>'+r.rows.length+'</b> résultat'+(r.rows.length>1?'s':'')+(r.hasMore?' · page '+(page+1)+' — d\\'autres existent, affine ou continue':(page>0?' · page '+(page+1):''));
   const pg=$('pg');pg.innerHTML='';
   if(page>0)pg.innerHTML+='<button class=sec onclick=go('+(page-1)+')>← Précédent</button>';
   if(r.hasMore)pg.innerHTML+='<button class=sec onclick=go('+(page+1)+')>Suivant →</button>';
  }catch(e){tb.innerHTML=state(IC_EMPTY,'Connexion perdue','Le serveur n’a pas répondu. Réessaie dans un instant.');$('meta').textContent='';}
  finally{btn.classList.remove('busy'); tw.classList.remove('is-loading');}
 }
-$('tb').innerHTML=state(IC_SEARCH,'Lance une recherche','Un nom, une commune ou un n° de matricule — puis Rechercher.');
+/* Une recherche doit pouvoir se partager : ?nom=HOARAU&commune=Saint-Paul
+   remplit le formulaire et lance la requete. L URL suit ensuite chaque
+   recherche (history.replaceState), donc un signet ramene le meme resultat. */
+const P=new URLSearchParams(location.search);
+const CHAMPS=['nom','prenom','commune','type','mat','anneeMin','anneeMax'];
+let amorce=false;
+for(const c of CHAMPS) if(P.get(c)){ $(c).value=P.get(c); amorce=true; }
+if(P.get('matonly')==='1'){ $('matonly').checked=true; amorce=true; }
+if(amorce) go(Number(P.get('page')||0));
+else $('tb').innerHTML=state(IC_SEARCH,'Lance une recherche','Un nom, une commune ou un n° de matricule — puis Rechercher.');
 </script></body></html>`.replace('__COMM__', COMMUNES.map(c => `<option>${c}</option>`).join(''));
 
 http.createServer((req, res) => {
@@ -209,7 +408,19 @@ http.createServer((req, res) => {
       res.end(JSON.stringify({ error: e.message, rows: [] }));
     }
   } else {
+    // Recalcule a chaque affichage : la base grossit pendant une recolte.
+    const s = stats();
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(PAGEHTML);
+    res.end(PAGEHTML
+      .replace('__ACTES__', '<b>' + fr(s.actes) + '</b>')
+      .replace('__MATS__', '<b>' + fr(s.matricules) + '</b>')
+      .replace('__ACTESMAT__', fr(s.actesMatricules))
+      .replace('__PHOTOS__', fr(s.photos))
+      .replace(/__SRC__/g, s.source)
+      .replace('__BADGE__', Env.PROD ? '' : '<span class=envdev>DEV</span> '));
   }
-}).listen(PORT, HOST, () => console.log(`Recherche sur http://${HOST}:${PORT}  (base ${DB})`));
+}).listen(PORT, HOST, () => {
+  Env.banniere('recherche IDLR');
+  console.log(`Ouvrir : ${Env.urlLocale(HOST, PORT)}  (base ${DB})`);
+  if (HOST === '0.0.0.0') console.log(`Depuis le reseau : http://<ip-du-serveur>:${PORT}`);
+});

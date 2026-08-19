@@ -83,6 +83,7 @@ function mgStatistiques() {
 
   return {
     ok: true,
+    env: mgEnv(),
     genere_le: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm'),
     classeur: mgClasseur_().getUrl(),
 

@@ -69,6 +69,8 @@ button[disabled] { opacity:.5; cursor:default; }
   border-bottom:1px solid var(--border);
 }
 .etat b { color:var(--text-primary); font-variant-numeric:tabular-nums; }
+.badge-dev{display:inline-block;background:#f59e0b;color:#1f1300;font-weight:700;font-size:10.5px;letter-spacing:.06em;padding:2px 7px;border-radius:4px;margin-right:8px;vertical-align:2px}
+
 
 /* ------------------------------------------------------------ résultats -- */
 /* Le tableau défile dans SON conteneur : la page, elle, ne bouge pas. */
@@ -193,7 +195,8 @@ function demarrer(a) {
   remplir($('origine'), a.origines, 'Toutes');
   remplir($('contributeur'), a.contributeurs, 'Tous');
 
-  $('resume').innerHTML = '<b>' + n(a.lignes) + '</b> engagés · <b>' +
+  $('resume').innerHTML = (a.env === 'prod' ? '' : '<span class="badge-dev">DEV</span>') +
+    '<b>' + n(a.lignes) + '</b> engagés · <b>' +
     n(a.matriculesDistincts) + '</b> matricules · MG ' + n(a.plage.min) + ' à ' + n(a.plage.max);
 
   $('zone').innerHTML = '<div class="message">Lance une recherche, ou clique sur ' +

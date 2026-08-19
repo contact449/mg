@@ -1,0 +1,16 @@
+{
+  "name": "cherche-mg",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Matricules generales (cherchemg.fr) : recolte en deux phases",
+  "engines": {
+    "node": ">=20"
+  },
+  "_comment": "Les memes noms de scripts qu'en dessous, dans moissonneur/. Tout se lance donc indifferemment depuis ce dossier ou depuis moissonneur/, comme dans croisement_mg_idlr. Les scripts resolvent leurs fichiers par __dirname, jamais par le dossier courant : la delegation est donc sure.",
+  "scripts": {
+    "start": "node moissonneur/harvest.cjs",
+    "index": "node moissonneur/harvest.cjs --index",
+    "fiches": "node moissonneur/harvest.cjs --fiches",
+    "test": "node test/test_parser.cjs && node test/test_balayage.cjs && node test/test_engages.cjs && node moissonneur/harvest.cjs --selftest"
+  }
+}

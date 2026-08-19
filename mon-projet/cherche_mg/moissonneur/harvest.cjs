@@ -57,6 +57,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const Env = require('./Env.js');
 
 /* ----------------------------------------------------------- réglages ---- */
 
@@ -346,6 +347,12 @@ function selftest() {
     }
   } else console.log('SAUTE  ../Config.gs absent (normal sur le VPS)');
 
+  const refEnv = path.join(__dirname, '..', '..', 'ile_archive_de_la_reunion', 'moissonneur', 'Env.js');
+  if (fs.existsSync(refEnv)) {
+    check('Env.js identique a la reference',
+          fs.readFileSync(path.join(__dirname, 'Env.js'), 'utf8') === fs.readFileSync(refEnv, 'utf8'),
+          true);
+  }
   console.log('\n=== phase 1 : parsing de l\'index ===');
   const p = ctx.mgParsePatro(fix('patro_sam.html'));
   check('lignes', p.total, 3574);
@@ -375,6 +382,19 @@ function selftest() {
 async function principal() {
   const args = process.argv.slice(2);
   if (args.includes('--selftest')) process.exit(selftest() === 0 ? 0 : 1);
+
+  // Tout le reste interroge cherchemg.fr. En dev il faut l'autoriser :
+  // le site est tenu par un benevole et s'auto-limite deja a 1 requete / 6 s.
+  try {
+    Env.exigerReseau('cherchemg.fr',
+      args.indexOf('--fiches') !== -1
+        ? 'La phase 2 demande une requete par matricule, soit ~33 h.'
+        : 'Le balayage de l index represente 26 requetes de plusieurs Mo.');
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  Env.banniere('moissonneur MG');
 
   const veutIndex = args.includes('--index');
   const veutFiches = args.includes('--fiches');

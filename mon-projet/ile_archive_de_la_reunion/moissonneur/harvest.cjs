@@ -41,6 +41,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const Env = require('./Env.js');
 
 /* ------------------------------------------------------------------ config */
 
@@ -365,5 +366,20 @@ function selftest() {
   console.log('selftest OK');
 }
 
-if (process.argv.includes('--selftest')) { selftest(); }
-else { harvest().catch(e => { console.error(e); process.exit(1); }); }
+if (process.argv.includes('--selftest')) {
+  selftest();                       // hors ligne : aucune autorisation requise
+} else {
+  // Une recolte complete represente des heures de trafic sur un serveur
+  // associatif. En dev, il faut l'autoriser explicitement.
+  // Message lisible plutot qu'une pile d'appels : c'est une decision de
+  // configuration, pas un plantage.
+  try {
+    Env.exigerReseau('iledelareunion-archive.com',
+      'harvest.cjs va parcourir 3 250 buckets, soit 15 a 26 h de requetes.');
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  Env.banniere('moissonneur IDLR');
+  harvest().catch(e => { console.error(e); process.exit(1); });
+}

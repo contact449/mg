@@ -355,6 +355,7 @@ function mgAmorcerRecherche() {
     colonnes: mgColonnesAffichables_(data),
     origines: mgValeursDistinctes_('origine', 60),
     contributeurs: mgValeursDistinctes_('contributeur', 40),
+    env: mgEnv(),
     urlFiche: MG_CFG.BASE + MG_CFG.PATH_MG + '?MgChaine='
   };
 }

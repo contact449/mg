@@ -170,6 +170,36 @@ var MG_CHAMPS_CONVOI = {
   'sources':             'sources'
 };
 
+/* ------------------------------------------------------------ environnement */
+
+/**
+ * Environnement du projet : 'dev' ou 'prod', lu dans les proprietes du script.
+ *
+ * dev par defaut : un projet frais ne peut pas se faire passer pour la prod
+ * par oubli. Les deux projets Apps Script (DEV et PROD) portent le meme code ;
+ * seule cette propriete les distingue, et elle s'affiche dans les ecrans.
+ *
+ * Pour declarer la production, une fois, dans le projet PROD :
+ *     mgDefinirEnv('prod')
+ */
+function mgEnv() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('MG_ENV') === 'prod'
+      ? 'prod' : 'dev';
+  } catch (e) {
+    return 'dev';
+  }
+}
+
+/** Declare l'environnement du projet courant. A lancer une seule fois. */
+function mgDefinirEnv(nom) {
+  var v = String(nom || '').toLowerCase();
+  if (v !== 'dev' && v !== 'prod') throw new Error('Environnement attendu : dev ou prod');
+  PropertiesService.getScriptProperties().setProperty('MG_ENV', v);
+  Logger.log('Environnement du projet : %s', v);
+  return v;
+}
+
 /* -------------------------------------------------------------- utilitaires */
 
 /** Numero de MG valide ? Renvoie l'entier ou null. */

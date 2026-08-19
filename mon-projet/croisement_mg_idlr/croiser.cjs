@@ -35,6 +35,7 @@ const path = require('path');
 const CFG = require('./Config.js');
 const { lireIndexMg, ageIndexMgJours, ligneCsv } = require('./mg.cjs');
 const { lireIdlr } = require('./idlr.cjs');
+const Env = require('./Env.js');
 
 /* ------------------------------------------------- concordance des noms ---- */
 
@@ -263,6 +264,18 @@ function afficher(r) {
 
 /* -------------------------------------------------------------- selftest --- */
 
+/**
+ * Une copie conforme doit le rester. Sans ce controle, deux dossiers
+ * divergent en silence et on debogue longtemps la mauvaise version.
+ */
+function verifierCopie(nom, reference) {
+  if (!fs.existsSync(reference)) { console.log("SAUTE  reference absente : " + nom); return; }
+  const ok = fs.readFileSync(require("path").join(__dirname, nom), "utf8")
+           === fs.readFileSync(reference, "utf8");
+  console.log((ok ? "OK   " : "ECHEC") + " " + nom + " identique a la reference");
+  if (!ok) process.exitCode = 1;
+}
+
 function selftest() {
   let ko = 0;
   const check = (nom, reel, attendu) => {
@@ -282,6 +295,13 @@ function selftest() {
   check('nom IDLR vide', concordance('Tazana', '', ''), '?');
   check('jeton trop court ignore', concordance('Li', 'Li', ''), '?');
 
+  console.log('');
+  console.log('=== environnement ===');
+  check('OCI_ENV reconnu', ['dev', 'prod'].indexOf(Env.NOM) !== -1, true);
+  check('reseau ferme en dev sans autorisation',
+        (Env.DEV && !process.env.OCI_RESEAU) ? Env.RESEAU === false : true, true);
+  verifierCopie('Env.js',
+    path.join(__dirname, '..', 'ile_archive_de_la_reunion', 'moissonneur', 'Env.js'));
   console.log('\n=== chaine de lecture ===');
   // Cette application ne parse plus rien : elle lit deux sorties de moissonneur.
   // La non-derive des copies du parser MG est verifiee chez son proprietaire,

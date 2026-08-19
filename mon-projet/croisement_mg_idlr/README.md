@@ -182,8 +182,12 @@ d'époque varient énormément.
 ## 5. Tableau de bord
 
 ```bash
-node serve.cjs           # PORT=8092 HOST=0.0.0.0
+node serve.cjs           # puis ouvrir http://localhost:8092
 ```
+
+> `HOST` vaut `0.0.0.0` par défaut : c'est l'adresse d'**écoute** (toutes les
+> interfaces), pas une adresse à taper dans un navigateur — celui-ci répondrait
+> `ERR_ADDRESS_INVALID`. Ouvre `localhost`, ou l'IP du serveur depuis le réseau.
 
 Chiffre héros (matricules communs), jauges de recouvrement dans les deux sens,
 barre part-à-tout **MG seul / communs / IDLR seul**, indicateurs de qualité,
@@ -201,7 +205,180 @@ seule.
 
 ---
 
-## 6. Mise à jour semestrielle
+## 6. Recherche croisée
+
+Une requête dans **toutes les sources à la fois**, une ligne par matricule,
+colorée selon sa provenance.
+
+```bash
+npm run recherche        # puis http://localhost:8093
+```
+
+| Couleur | Provenance | Sur la base actuelle |
+|---|---|---|
+| 🟡 jaune | présent seulement dans les Archives (`actes.csv`) | 13 309 |
+| 🟢 vert | présent seulement dans MG (`engages.csv`) | 10 485 |
+| 🔵 bleu | présent dans les **deux** | 9 060 |
+| 🩷 rose | **Filae** : saisi à la main, absent des deux bases (`filae.csv`) | selon tes saisies |
+
+**La couleur n'est jamais seule.** Chaque ligne porte aussi le mot « Archives »,
+« MG », « Les deux » ou « Filae ». Ce n'est pas de la redondance décorative : jaune et vert
+sont à ΔE 6,9 en protanopie, donc difficilement séparables pour environ 8 % des
+hommes. L'étiquette est ce qui rend le code couleur lisible pour eux. Les fonds
+de ligne sont des teintes très pâles — le texte y garde un contraste de 15:1 à
+18:1 dans les deux thèmes, là où un aplat saturé le rendrait illisible.
+
+### Saisir un matricule Filae
+
+Le bouton **« + Matricule Filae »** du formulaire ouvre la saisie d'un numéro
+qu'aucune des deux bases ne connaît. Champs : nom, prénom, ville, date de
+naissance, date de décès, conjoint, père, mère, et deux cases divers. Seuls le
+numéro et le nom sont obligatoires.
+
+**Les dates sont du texte libre**, pas un sélecteur. En généalogie on relève
+« 1887 », « vers 1890 », « 12 germinal an XI » : un `input type=date` refuserait
+ces trois-là, qui sont pourtant les plus fréquents.
+
+**Un matricule déjà présent dans Archives ou dans MG est refusé**, avec un
+message nommant la base. Filae comble les trous de la série, il ne double pas
+ce qui existe — sinon la couverture compterait deux fois le même numéro et la
+barre des 130 000 mentirait.
+
+Après enregistrement la page revient filtrée sur le nouveau numéro : la ligne
+rose est là, et les deux graphiques l'ont intégrée. Le rechargement est
+nécessaire, la barre et la frise étant calculées par le serveur.
+
+Tout atterrit dans **`filae.csv`**, à côté du code — un CSV lisible et
+modifiable à la main, comme les deux autres sources. Aucune base à installer ;
+une sauvegarde se fait par copie. C'est le **seul** fichier que cette
+application écrit : `actes.csv` et `engages.csv` restent en lecture seule.
+
+Si un moissonnage semestriel finit par apporter un numéro déjà saisi, la ligne
+affiche sa vraie provenance (Archives ou MG) **plus une pastille rose** : la
+saisie n'est pas perdue, et elle n'est pas comptée deux fois.
+
+```bash
+FILAE_CSV=/autre/chemin/filae.csv npm run recherche   # déplacer le fichier
+```
+
+### Un matricule présent des deux côtés
+
+Une seule ligne, bleue : la synthèse. Le détail de chaque base n'est pas déplié
+ici — pour voir les actes un par un, la recherche dédiée de chaque application
+est faite pour ça (`ile_archive_de_la_reunion/moissonneur`, port 8091).
+
+La colonne **Actes** indique combien d'actes les Archives portent pour ce
+matricule, et **Identité (MG)** liste les engagés que MG y rattache.
+Filtres : texte libre (identité, nom, notes, sources, origine — insensible aux
+accents), provenance, plage de matricules, commune, origine.
+
+Comme la recherche IDLR, les critères passent dans l'URL :
+
+```
+http://localhost:8093/?texte=petan
+http://localhost:8093/?provenance=idlr&commune=Saint-Denis
+http://localhost:8093/?provenance=deux&matMin=1&matMax=1000
+```
+
+### Couverture de la série — deux niveaux de lecture
+
+La légende donne les effectifs par provenance, puis deux visuels reprennent les
+**mêmes chiffres** à deux échelles :
+
+**Ensemble de la série** — une barre : les 130 000 numéros d'un seul tenant, les
+segments proportionnels, le gris étant ce qu'aucune source ne connaît.
+
+**Par tranche de 10 000** — une frise de **13 colonnes** : 1–10 000,
+10 001–20 000, … 120 001–130 000. Chaque colonne est une jauge **sur 10 000**,
+pas une barre à l'échelle du maximum observé : on lit donc directement la part
+connue de chaque tranche, et les tranches se comparent entre elles.
+
+Dans les deux, les couleurs s'empilent dans le même ordre : Archives seul, les
+deux, MG seul, puis Filae. Survoler une colonne donne ses chiffres exacts ;
+**cliquer filtre la recherche sur cette tranche**, recliquer désélectionne, et
+la colonne active reste encadrée.
+
+> **Un plancher de 2 px.** Un matricule vaut 0,01 % d'une tranche et 0,0008 %
+> de la série : à l'échelle, son segment ferait 0,01 px — invisible. Une saisie
+> Filae qui n'apparaît pas serait prise pour une saisie perdue, donc tout
+> segment non vide reçoit 2 px au minimum. La proportion est légèrement faussée
+> vers le haut pour les très petits effectifs ; les nombres exacts restent dans
+> la légende et dans l'infobulle de chaque colonne.
+
+Ce que la forme montre d'emblée : la tranche **1–10 000 est couverte à 61,4 %**,
+loin devant les autres (20 à 26 %), et la dernière tombe à 3,6 %. Une part de
+cette avance vient des faux matricules extraits de dates, qui produisent surtout
+de petits numéros.
+
+> **Les trois affichages comptent la même chose** : la plage 1–130 000. Les
+> 1 787 numéros hors plage apparaissent comme une entrée grise à part dans la
+> légende — ils restent cherchables mais n'entrent dans aucune tranche. Les
+> totaux tombent juste : 11 522 + 10 485 + 9 060 + 1 787 = 32 854, plus tes
+> saisies Filae.
+>
+> La provenance est décidée **une seule fois**, par `provenanceDe()` dans
+> `recherche.cjs` : lignes, légende, barre et frise lisent toutes cette
+> fonction. Elles ne peuvent donc pas diverger, et ajouter une provenance ne
+> demande pas de retoucher quatre comptages censés rester d'accord.
+### Détail du calcul
+
+Un compteur en tête de page dit combien de matricules les deux bases connaissent
+**sur les 130 000** que la série peut porter, avec la répartition par provenance :
+
+```
+Couverture de la série — 31 067 matricules connus sur 130 000        23,9 %
+[■■■■ jaune ■■ bleu ■■ vert ]────────────── reste inconnu ──────────────
+```
+
+Seuls les numéros de la plage **1–130 000** entrent dans le calcul. Les autres
+ne peuvent pas être des matricules et gonfleraient la couverture à tort : on en
+compte **1 787**, tous du côté Archives, avec des valeurs allant jusqu'à
+`113413113413`. Ils viennent de la règle de concaténation du moissonneur —
+`N°13-1796` devient `131796` — et sont écartés, la note sous le compteur le
+disant explicitement.
+
+> La légende au-dessus compte **tous** les matricules trouvés (13 309 côté
+> Archives), le compteur seulement ceux de la plage (11 522). L'écart est
+> exactement les 1 787 hors plage. Les deux portées sont écrites, chacune sert
+> à autre chose : la légende décrit ce que les filtres renvoient, le compteur
+> ce qu'on couvre de la série.
+
+### Où mènent les liens
+
+Chaque lien renvoie à la base **d'où vient la donnée** :
+
+| Colonne | Lien | Présent quand |
+|---|---|---|
+| **MG** (le numéro) | `cherchemg.fr/mg.php?MgChaine=N` | MG connaît ce matricule — donc lignes vertes et bleues |
+| **Nom (Archives)** | l'acte sur `iledelareunion-archive.com` | l'acte porte une `url_demande_photo` |
+
+Sur une ligne **jaune**, le numéro n'est donc pas cliquable : ce matricule a été
+lu dans les observations d'un acte, MG ne le connaît pas, et le lien tomberait
+sur « ce numéro n'est pas encore présent ». Le lien utile y est celui du nom,
+qui mène à l'acte.
+
+Le lien vers les Archives porte un soulignement de la couleur des Archives, pour
+qu'on voie où il mène avant de cliquer.
+
+> Environ un tiers des actes n'ont pas d'`url_demande_photo` : le nom s'affiche
+> alors sans lien. Pour un matricule qui porte plusieurs actes, on retient le
+> premier qui en possède une plutôt que le premier venu — ce seul détail fait
+> passer les lignes bleues liées de 22 % à 80 %.
+
+### Sources lues
+
+| Base | Fichier | Repli |
+|---|---|---|
+| Archives | `IDLR_OUT` ou `../ile_archive_de_la_reunion/moissonneur/actes.csv` | — |
+| MG | `MG_ENGAGES` ou `../cherche_mg/engages.csv` | `mg_fiches.csv`, puis `mg_matricules.csv` |
+
+Les colonnes sont reconnues par leur **nom**, pas par leur position : remplacer
+`engages.csv` par `mg_fiches.csv` ne demande aucun réglage. Les doublons
+parfaits d'`actes.csv` sont écartés à la lecture, comme dans `importer.cjs`.
+
+---
+
+## 7. Mise à jour semestrielle
 
 `maj.cjs` enchaîne les trois étapes :
 
@@ -246,11 +423,15 @@ apports pendant un an.
 
 ---
 
-## 7. Tests
+## 8. Tests
 
 ```bash
+npm test                        # les trois suites ci-dessous
+
 node test/test_croisement.cjs   # 37 assertions, bout en bout, hors ligne
-node croiser.cjs --selftest     # concordance des noms + état des deux sources
+node test/test_filae.cjs        # 55 assertions sur la provenance Filae
+node filae.cjs                  # 27 assertions sur le magasin de saisie
+node croiser.cjs --selftest     # concordance des noms + état des sources
 ```
 
 `test_croisement.cjs` fabrique un index MG et un `actes.csv` de synthèse dans un
@@ -259,9 +440,20 @@ contenu des trois CSV. Les cas piégeux y sont volontaires : série ambiguë,
 matricule écrit `N°2-537`, numéro hors plage, et un champ `obs` contenant
 virgule, guillemets et saut de ligne — celui qui casse un découpage naïf.
 
+`test_filae.cjs` vérifie ce qui doit rester cohérent quand on ajoute une
+provenance : la ligne, la légende, la barre et la frise donnent-elles les mêmes
+nombres ? Le plancher de 2 px est-il bien posé ? Un matricule déjà connu est-il
+refusé ? Et surtout le cas qui n'arrivera que dans six mois — un moissonnage
+qui rattrape une saisie : la ligne doit changer de provenance sans perdre la
+trace de la saisie **ni** compter le numéro deux fois.
+
+`filae.cjs --selftest` couvre l'écriture CSV, où se cachent les pièges
+classiques : un nom contenant une virgule, des guillemets (`dit "le grand"`) ou
+un saut de ligne doit revenir intact après un aller-retour sur disque.
+
 ---
 
-## 8. Courtoisie
+## 9. Courtoisie
 
 Les deux sites sont tenus par des bénévoles, et leurs données appartiennent à
 leurs contributeurs et releveurs. Ce dossier ne fait que **comparer** ce que les

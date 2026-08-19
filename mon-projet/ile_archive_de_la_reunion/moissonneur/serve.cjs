@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const http = require('http');
+const Env = require('./Env.js');
 
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -144,5 +145,7 @@ http.createServer((req, res) => {
     res.end(PAGE);
   }
 }).listen(PORT, HOST, () => {
-  console.log(`Tableau de bord sur http://${HOST}:${PORT}  (${TOTAL} cases à traiter)`);
+  Env.banniere('tableau de bord IDLR');
+  console.log(`Ouvrir : ${Env.urlLocale(HOST, PORT)}  (${TOTAL} cases à traiter)`);
+  if (HOST === '0.0.0.0') console.log(`Depuis le reseau : http://<ip-du-serveur>:${PORT}`);
 });

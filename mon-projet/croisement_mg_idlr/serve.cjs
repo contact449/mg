@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const CFG = require('./Config.js');
+const Env = require('./Env.js');
 
 const PORT = Number(process.env.PORT || 8092);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -242,6 +243,8 @@ const serveur = http.createServer((req, res) => {
 });
 
 serveur.listen(PORT, HOST, () => {
-  console.log('Tableau de bord du croisement : http://' + HOST + ':' + PORT);
+  Env.banniere('tableau de bord du croisement');
+  console.log('Ouvrir : ' + Env.urlLocale(HOST, PORT));
+  if (HOST === '0.0.0.0') console.log('Depuis le reseau : http://<ip-du-serveur>:' + PORT);
   console.log('Sorties lues dans : ' + CFG.DOSSIER);
 });

@@ -46,7 +46,30 @@ Stats globales → récap critères (avec nb d'actes) → tableau d'actes (colon
 
 ---
 
-## 2. Installation
+## 2. Lancer en local (outils Node)
+
+Toutes les commandes se lancent **depuis ce dossier** :
+
+```bash
+npm run search       # moteur de recherche, http://localhost:8091
+npm run dashboard    # suivi de récolte,    http://localhost:8080
+npm run import       # actes.csv -> actes.db
+npm start            # récolte complète (reprend où elle s’était arrêtée)
+npm test             # selftests, hors ligne
+```
+
+Les mêmes commandes existent à l’identique dans `moissonneur/`, où vivent les
+scripts. Peu importe le dossier : ils résolvent leurs fichiers par leur propre
+emplacement, jamais par le dossier courant.
+
+**Préfère `npm run` à `node fichier.cjs`.** `node search.cjs` ne fonctionne que
+depuis `moissonneur/` ; ailleurs Node échoue sur `MODULE_NOT_FOUND` avant même
+d’avoir chargé la moindre ligne du projet. `npm run` répond partout, et sur un
+nom erroné il liste les commandes disponibles au lieu d’une pile d’erreur.
+
+---
+
+## 3. Installation (Apps Script)
 
 1. Nouveau projet Apps Script → créer `Config.gs`, `Parser.gs`, `Client.gs`, `Api.gs`.
 2. Déployer : *Déployer > Nouveau déploiement > Application Web*, exécuter en tant
@@ -54,7 +77,7 @@ Stats globales → récap critères (avec nb d'actes) → tableau d'actes (colon
 
 ---
 
-## 3. Première exécution (à faire une fois)
+## 4. Première exécution (à faire une fois)
 
 Dans l'éditeur, lance **`testSearch()`** (recherche Kichenin/Naissance/CINOR).
 
@@ -68,7 +91,7 @@ respecte à l'identique du navigateur ; `debugSearch()` est là si jamais.
 
 ---
 
-## 4. Endpoints
+## 5. Endpoints
 
 ```
 GET .../exec?action=communes
@@ -95,7 +118,7 @@ Sortie : voir `SCHEMA.md` (schéma stable quel que soit le type d'acte,
 
 ---
 
-## 5. Garde-fous
+## 6. Garde-fous
 
 - **Throttle** 1,5 s entre requêtes · **cache** 6 h · **`MAX_PAGES`** = 20 · **User-Agent** identifiant
 - **`warnings[]`** : jamais d'échec silencieux (voir `SCHEMA.md`)
@@ -103,7 +126,7 @@ Sortie : voir `SCHEMA.md` (schéma stable quel que soit le type d'acte,
 
 ---
 
-## 6. Table des codes
+## 7. Table des codes
 
 | Commune | Code | Secteur | Code secteur |
 |---|---|---|---|

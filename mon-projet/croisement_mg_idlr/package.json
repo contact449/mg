@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "description": "Croisement des matricules cherchemg.fr x iledelareunion-archive.com",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node croiser.cjs",
     "mg": "node mg.cjs",
     "maj": "node maj.cjs",
     "serve": "node serve.cjs",
-    "test": "node test/test_croisement.cjs"
+    "test": "node test/test_croisement.cjs && node test/test_filae.cjs && node filae.cjs",
+    "recherche": "node recherche.cjs"
   }
 }

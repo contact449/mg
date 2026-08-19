@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const CFG = require('./Config.js');
+const Env = require('./Env.js');
 
 const ARGS = process.argv.slice(2);
 const DRY = ARGS.includes('--dry');
@@ -86,6 +87,13 @@ function evolution() {
 async function principal() {
   const t0 = Date.now();
   journal('=== Mise a jour semestrielle MG x IDLR ===');
+  Env.banniere('mise a jour semestrielle');
+  // Les deux moissonneurs refusent d'eux-memes en dev ; on le dit tout de
+  // suite plutot que de laisser echouer l'etape 1 apres coup.
+  if (!Env.RESEAU && !ARGS.includes('--dry')) {
+    journal('Environnement dev : les moissonneurs refuseront de sortir.');
+    journal('Utilise  OCI_ENV=prod node maj.cjs  (ou --sans-idlr --sans-mg).');
+  }
 
   /* --- 1. IDLR ----------------------------------------------------------- */
   if (ARGS.includes('--sans-idlr')) {

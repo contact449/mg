@@ -1,0 +1,18 @@
+{
+  "name": "ile-archive-de-la-reunion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Actes IDLR (iledelareunion-archive.com) : recolte, import, recherche",
+  "engines": {
+    "node": ">=20"
+  },
+  "_comment": "Les memes noms de scripts qu'en dessous, dans moissonneur/. Tout se lance donc indifferemment depuis ce dossier ou depuis moissonneur/, comme dans croisement_mg_idlr. Les scripts resolvent leurs fichiers par __dirname, jamais par le dossier courant : la delegation est donc sure.",
+  "scripts": {
+    "start": "node moissonneur/harvest.cjs",
+    "refresh": "node moissonneur/harvest.cjs --refresh",
+    "import": "node moissonneur/importer.cjs",
+    "search": "node moissonneur/search.cjs",
+    "dashboard": "node moissonneur/serve.cjs",
+    "test": "node moissonneur/harvest.cjs --selftest && node moissonneur/importer.cjs --selftest"
+  }
+}

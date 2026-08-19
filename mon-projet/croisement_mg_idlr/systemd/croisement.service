@@ -11,6 +11,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+
+# La production doit etre declaree : sans cette ligne, maj.cjs tourne en dev
+# et les deux moissonneurs refusent toute requete sortante.
+Environment=OCI_ENV=prod
 User=ubuntu
 WorkingDirectory=/home/ubuntu/croisement_mg_idlr
 ExecStart=/usr/bin/node maj.cjs
