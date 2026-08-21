@@ -19,11 +19,18 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/croisement_mg_idlr
 ExecStart=/usr/bin/node maj.cjs
 
-# La passe IDLR fait ~3250 requetes a 3 s : plusieurs heures. Pas de minuterie
-# de securite trop courte, sinon systemd tuerait une execution normale.
-TimeoutStartSec=20h
+# Une mise a jour complete, c'est la passe IDLR (15 a 28 h) PUIS les fiches MG
+# (~33 h) : environ 60 h dans le pire cas. Une minuterie trop courte tuerait
+# une execution parfaitement normale, au milieu, sans que rien ne le dise.
+# 96 h laissent de la marge sans jamais laisser une unite bloquee un semestre.
+TimeoutStartSec=96h
 
-# Webhook Discord facultatif (voir notify.cjs du moissonneur).
+# Webhook Discord — VIVEMENT conseille : c'est lui qui rend la mise a jour
+# visible sans SSH. Avec, maj.cjs previent au demarrage, lance notify.cjs en
+# fond pendant la recolte (resume toutes les 30 min), poste le rapport de
+# croisement des qu'il est pret, puis signale les fiches et tout echec.
+# Sans lui, tout marche pareil mais en silence : il reste maj.log,
+# `node maj.cjs --etat` et les tableaux de bord.
 # Environment=IDLR_DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
 # Chemins des sources si elles ne sont pas aux emplacements par defaut :
 # Environment=IDLR_DB=/home/ubuntu/moissonneur/actes.db

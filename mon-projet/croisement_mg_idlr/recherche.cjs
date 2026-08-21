@@ -3,7 +3,7 @@
  * ============================================================================
  *  RECHERCHE CROISEE — une seule requete dans toutes les sources a la fois.
  *
- *  Archives (actes.csv)  +  MG (engages.csv)  +  Filae (filae.csv)
+ *  Archives (actes.csv)  +  MG (engages.csv)  +  mg oci (mgoci.csv)
  *                        ->  une ligne par matricule
  *
  *  UNE ligne par matricule, coloree selon sa provenance :
@@ -12,11 +12,11 @@
  *     bleu   present dans les DEUX — une seule ligne, la synthese ; le
  *            detail de chaque base ne sort pas ici, il se consulte dans la
  *            recherche dediee de chaque application.
- *     rose   Filae : saisi a la main parce qu'aucune des deux bases ne le
+ *     rose   mg oci : saisi a la main parce qu'aucune des deux bases ne le
  *            connait. Seule provenance que cette application ecrit.
  *
  *  La couleur n'est jamais seule : chaque ligne porte aussi le mot
- *  « Archives », « MG », « Les deux » ou « Filae ». Ce n'est pas de la
+ *  « Archives », « MG », « Les deux » ou « mg oci ». Ce n'est pas de la
  *  redondance decorative — jaune et vert sont a DeltaE 6,9 en protanopie,
  *  c'est-a-dire difficilement separables pour ~8 % des hommes. L'etiquette
  *  est ce qui rend le code couleur lisible pour eux.
@@ -33,11 +33,11 @@
  *  Lancer :  node recherche.cjs        # puis http://localhost:8093
  *  Reglages (env) : PORT=8093  HOST=0.0.0.0
  *                   IDLR_OUT=actes.csv        MG_ENGAGES=engages.csv
- *                   FILAE_CSV=filae.csv
+ *                   MGOCI_CSV=mgoci.csv
  *
  *  Les fichiers sont relus quand ils changent (taille ou date), avec un
  *  plancher proportionnel au cout de la lecture — meme regle que search.cjs.
- *  Une saisie Filae court-circuite ce plancher : elle doit se voir aussitot.
+ *  Une saisie mg oci court-circuite ce plancher : elle doit se voir aussitot.
  * ============================================================================
  */
 'use strict';
@@ -48,12 +48,47 @@ const http = require('http');
 const CFG = require('./Config.js');
 const Env = require('./Env.js');
 const { parcourirCsv } = require('./idlr.cjs');
-const Filae = require('./filae.cjs');
+const MgOci = require('./mgoci.cjs');
 
 const PORT = Number(process.env.PORT || 8093);
 const HOST = process.env.HOST || '0.0.0.0';
 const PAGE = 100;
 const MAX_EXEMPLES = 3;
+
+/**
+ * Les types d'acte, en toutes lettres et dans l'ordre d'une vie.
+ *
+ * N, D, M, PM et DIV sont ceux du moissonneur des Archives ; R et L viennent
+ * de la saisie mg oci, qui distingue ce que le site range sous les naissances.
+ * Un code inconnu s'affiche tel quel plutot que d'etre tu : une ligne editee
+ * a la main ne doit pas perdre son type en silence.
+ *
+ * L'ordre des cles est celui de la colonne, et c'est celui d'une vie, pas
+ * celui du fichier — deux matricules portant les memes actes doivent se lire
+ * pareil, quel que soit l'ordre ou le moissonneur les a rencontres.
+ */
+const TYPE_ACTE = { N: 'Naissance', R: 'Reconnaissance', L: 'Légitimation',
+                    M: 'Mariage', PM: 'Promesse', DIV: 'Divorce', D: 'Décès' };
+const ORDRE_TYPE = Object.keys(TYPE_ACTE);
+const rangType = (t) => {
+  const i = ORDRE_TYPE.indexOf(t);
+  return i === -1 ? ORDRE_TYPE.length : i;   // inconnu : a la fin, jamais perdu
+};
+
+/**
+ * Les types d'un matricule, dedoublonnes et en toutes lettres.
+ *
+ * Un matricule porte souvent plusieurs actes — naissance puis mariage puis
+ * deces. La colonne les donne tous, separes comme les notes : « Naissance ·
+ * Mariage ». Dedoublonner est indispensable, trois actes de naissance pour
+ * une fratrie homonyme n'ecriraient sinon que trois fois le meme mot.
+ */
+function typesEnClair() {
+  const vus = new Set();
+  for (const s of arguments) if (s) for (const t of s) vus.add(t);
+  return [...vus].sort((p, q) => rangType(p) - rangType(q))
+    .map((t) => TYPE_ACTE[t] || t).join(' · ');
+}
 
 /* ------------------------------------------------------- sources ---------- */
 
@@ -124,10 +159,17 @@ async function lireCsv(chemin, garder) {
   return { lignes, doublons, entete: entete || [] };
 }
 
-/** Ajoute un exemplaire a l'entree d'un matricule, en bornant la memoire. */
+/**
+ * Ajoute un exemplaire a l'entree d'un matricule, en bornant la memoire.
+ *
+ * `types` est le seul champ qui echappe au plafond des exemples : c'est un
+ * ensemble de codes d'une lettre ou deux, il ne peut pas grossir au-dela des
+ * sept types existants. La colonne Type dit donc tout ce que le matricule
+ * porte, la ou trois exemples sur dix actes tairaient un mariage.
+ */
 function ajouter(carte, mg, exemple) {
   let e = carte.get(mg);
-  if (!e) { e = { n: 0, exemples: [] }; carte.set(mg, e); }
+  if (!e) { e = { n: 0, exemples: [], types: new Set() }; carte.set(mg, e); }
   e.n++;
   if (e.exemples.length < MAX_EXEMPLES) e.exemples.push(exemple);
 }
@@ -146,7 +188,7 @@ async function construire() {
 
   const idlr = new Map();
   const mg = new Map();
-  const filae = new Map();
+  const mgoci = new Map();
   let statIdlr = { lignes: 0, doublons: 0 };
   let statMg = { lignes: 0, doublons: 0 };
 
@@ -154,15 +196,32 @@ async function construire() {
     statIdlr = await lireCsv(fIdlr, (l, i) => {
       const num = Number(String(l[i('matricule')] || '').replace(/\D/g, ''));
       if (!num) return;
+      // Normalise : la colonne est ecrite par un moissonneur, mais le CSV
+      // peut avoir ete repris a la main entre-temps.
+      const type = String(l[i('type_acte')] || '').trim().toUpperCase();
       ajouter(idlr, num, {
         nom: l[i('nom')] || '', prenom: l[i('prenom')] || '',
         commune: l[i('commune')] || '', date: l[i('date_iso')] || '',
-        type: l[i('type_acte')] || '', obs: l[i('obs')] || '',
+        type: type, obs: l[i('obs')] || '',
         origine: l[i('origine')] || '',
+        // Entourage releve dans l'acte. Le conjoint est la depuis toujours ;
+        // les parents n'arrivent qu'avec un moissonnage posterieur a l'ajout
+        // de leurs colonnes. i() rend -1 pour une colonne absente, d'ou || ''.
+        //
+        // Les trois types d'actes donnent le PRENOM du pere et le NOM COMPLET
+        // de la mere (verifie sur pages reelles le 21/08/2026 : naissance
+        // 82/98/96 %, deces 58/66/64 %, mariage 80/94/92 %). Aucun ne donne le
+        // NOM du pere : c'est le patronyme de la personne, deja en colonne nom.
+        conjointNom: l[i('conjoint_nom')] || '', conjointPrenom: l[i('conjoint_prenom')] || '',
+        pereNom: l[i('pere_nom')] || '', perePrenom: l[i('pere_prenom')] || '',
+        mereNom: l[i('mere_nom')] || '', merePrenom: l[i('mere_prenom')] || '',
+        pereDecede: !!l[i('pere_decede')], mereDecede: !!l[i('mere_decede')],
+        parrain: l[i('parrain')] || '', marraine: l[i('marraine')] || '',
         // Lien vers l'acte sur iledelareunion-archive.com. Environ un tiers
         // des actes n'en ont pas : on affichera alors le nom sans lien.
         url: l[i('url_demande_photo')] || ''
       });
+      if (type) idlr.get(num).types.add(type);
     });
   }
 
@@ -180,9 +239,12 @@ async function construire() {
     });
   }
 
-  // Filae : la saisie manuelle. Seule source que cette application ecrit,
+  // mg oci : la saisie manuelle. Seule source que cette application ecrit,
   // et seule a n'avoir aucun moissonneur derriere elle.
-  for (const r of await Filae.lire()) ajouter(filae, r.matricule, r);
+  for (const r of await MgOci.lire()) {
+    ajouter(mgoci, r.matricule, r);
+    if (r.type_acte) mgoci.get(r.matricule).types.add(String(r.type_acte).trim().toUpperCase());
+  }
 
   /**
    * La provenance d'un numero, decidee UNE fois. Lignes, legende, barre et
@@ -190,36 +252,90 @@ async function construire() {
    * diverger, et ajouter une provenance ne demande pas de retoucher quatre
    * comptages qui doivent rester d'accord.
    *
-   * Filae vient en dernier parce qu'il n'a pas vocation a masquer une base
+   * mg oci vient en dernier parce qu'il n'a pas vocation a masquer une base
    * moissonnee : si un rafraichissement finit par apporter le numero, c'est
-   * Archives ou MG qui parle, et `dansFilae` garde la trace de la saisie.
+   * Archives ou MG qui parle, et `dansMgOci` garde la trace de la saisie.
    */
   const provenanceDe = (n) => (idlr.has(n) && mg.has(n)) ? 'deux'
-    : idlr.has(n) ? 'idlr' : mg.has(n) ? 'mg' : 'filae';
+    : idlr.has(n) ? 'idlr' : mg.has(n) ? 'mg' : 'mgoci';
 
   // Fusion : une entree par matricule, avec sa provenance.
   const lignes = [];
-  const tous = new Set([...idlr.keys(), ...mg.keys(), ...filae.keys()]);
+  const tous = new Set([...idlr.keys(), ...mg.keys(), ...mgoci.keys()]);
   for (const num of tous) {
     const a = idlr.get(num);
     const b = mg.get(num);
-    const c = filae.get(num);
+    const c = mgoci.get(num);
     const provenance = provenanceDe(num);
     const xa = (a && a.exemples[0]) || {};
     const xb = (b && b.exemples[0]) || {};
     const xc = (c && c.exemples[0]) || {};
 
-    // Une fiche Filae porte des champs qu'aucune des deux bases n'a : on les
+    // Une fiche mg oci porte des champs qu'aucune des deux bases n'a : on les
     // replie dans les colonnes existantes plutot que d'en ajouter cinq qui
     // resteraient vides sur 99 % des lignes.
-    const dateFilae = [xc.naissance ? '° ' + xc.naissance : '',
+    const dateMgOci = [xc.naissance ? '° ' + xc.naissance : '',
                        xc.deces ? '† ' + xc.deces : ''].filter(Boolean).join(' ');
-    const detailFilae = [
-      xc.conjoint ? 'conj. ' + xc.conjoint : '',
-      xc.pere ? 'père ' + xc.pere : '',
-      xc.mere ? 'mère ' + xc.mere : '',
-      xc.divers1, xc.divers2
-    ].filter(Boolean).join(' · ');
+    /**
+     * La commune d'une fiche mg oci : la ville saisie, sinon le lieu de
+     * naissance. Sur un matricule qu'aucune des deux bases ne connait, le
+     * lieu de naissance est souvent le seul lieu qu'on ait — une colonne
+     * vide en dirait moins. Et quand il n'est PAS celui affiche ici, il
+     * repart dans les notes, nomme : sinon la saisie serait perdue de vue.
+     */
+    const communeMgOci = xc.ville || xc.lieu_naissance || '';
+    const naissanceLieu = xc.lieu_naissance && xc.lieu_naissance !== communeMgOci
+      ? 'né(e) à ' + xc.lieu_naissance : '';
+    /**
+     * Le reste va dans les notes, la ou va deja le champ libre des Archives.
+     * Type d'acte et age n'ont d'equivalent dans aucune des deux bases : deux
+     * colonnes de plus resteraient vides sur 99 % des lignes. L'age est
+     * prefixe parce qu'un « 32 » seul, au milieu d'une note, ne se lit pas.
+     */
+    const detailMgOci = [naissanceLieu, xc.age ? 'âge : ' + xc.age : '',
+                         xc.remarque, xc.divers2].filter(Boolean).join(' · ');
+
+    /**
+     * Le type d'acte : celui des Archives, plus celui de la saisie quand un
+     * moissonnage l'a rattrapee. Les deux ont leur mot a dire — le site
+     * range reconnaissances et legitimations sous les naissances, et c'est
+     * justement la distinction que la saisie apporte.
+     *
+     * MG n'en donne aucun : la colonne reste vide sur une ligne verte, et
+     * son tiret gris dit « pas releve » plutot que « pas d'acte ».
+     */
+    const type = typesEnClair(a && a.types, c && c.types);
+
+    /**
+     * L'entourage : conjoint, pere, mere, dans une seule colonne.
+     *
+     * Trois colonnes de plus seraient vides sur la quasi-totalite des lignes
+     * — le conjoint ne concerne que les mariages (7,5 % des actes) et les
+     * parents ne sont releves que la aussi. Une colonne qui se remplit d'un
+     * cote ou de l'autre reste lisible ; trois colonnes vides ne le sont pas.
+     *
+     * Archives d'abord, mg oci en secours : une ligne bleue ou jaune montre ce
+     * que l'acte dit, une ligne rose ce que tu as saisi.
+     */
+    /**
+     * Père et mère, chacun dans SA colonne.
+     *
+     * Ils tenaient dans une colonne « Famille » commune tant qu'ils étaient
+     * rares. Ils ne le sont pas : le site les donne sur les naissances, les
+     * décès ET les mariages — de 58 à 98 % selon le champ et le type. Une
+     * colonne partagée avec le conjoint obligerait à lire des préfixes pour
+     * savoir de qui on parle ; deux colonnes se lisent d'un coup d'œil.
+     *
+     * Le NOM du père n'est donné par AUCUN type d'acte : c'est le patronyme
+     * de la personne, déjà dans la colonne Nom. On affiche donc son prénom
+     * seul et on ne recopie pas celui de l'enfant — 11 % des naissances sont
+     * des reconnaissances, où l'enfant peut porter un autre nom.
+     */
+    const paire = (nom, prenom) => [nom, prenom].filter(Boolean).join(' ');
+    const mort = (v, d) => (v ? v + (d ? ' †' : '') : (d ? '†' : ''));
+    const pere = mort(paire(xa.pereNom, xa.perePrenom) || xc.pere, xa.pereDecede);
+    const mere = mort(paire(xa.mereNom, xa.merePrenom) || xc.mere, xa.mereDecede);
+    const conjoint = paire(xa.conjointNom, xa.conjointPrenom) || xc.conjoint || '';
 
     lignes.push({
       mg: num,
@@ -228,12 +344,16 @@ async function construire() {
       nom: [xa.nom, xa.prenom].filter(Boolean).join(' ') ||
            [xc.nom, xc.prenom].filter(Boolean).join(' '),
       origine: xb.origine || xa.origine || '',
-      commune: xa.commune || xc.ville || '',
-      date: xb.naissance || xb.arrivee || xa.date || dateFilae,
+      commune: xa.commune || communeMgOci,
+      type,
+      date: xb.naissance || xb.arrivee || xa.date || dateMgOci,
+      pere,
+      mere,
+      conjoint,
       nActes: a ? a.n : 0,
       nEngages: b ? b.n : 0,
-      notes: xb.notes || xa.obs || detailFilae,
-      dansFilae: !!c,               // saisi a la main, meme si une base l'a rattrape depuis
+      notes: xb.notes || xa.obs || detailMgOci,
+      dansMgOci: !!c,               // saisi a la main, meme si une base l'a rattrape depuis
       // On prend le premier acte QUI A une URL, pas simplement le premier :
       // environ un tiers des actes n en ont pas, et se rabattre sur le
       // premier venu priverait de lien des matricules qui en meritent un.
@@ -241,11 +361,14 @@ async function construire() {
       dansMg: !!b,                  // MG connait-il ce matricule ?
       // champ de recherche prepare une fois, pas a chaque requete
       foin: norm([
-        num,
+        num, type,
         b ? b.exemples.map((x) => [x.identite, x.notes, x.sources, x.origine, x.contributeur].join(' ')).join(' ') : '',
-        a ? a.exemples.map((x) => [x.nom, x.prenom, x.commune, x.obs, x.origine].join(' ')).join(' ') : '',
-        c ? c.exemples.map((x) => [x.nom, x.prenom, x.ville, x.naissance, x.deces,
-          x.conjoint, x.pere, x.mere, x.divers1, x.divers2].join(' ')).join(' ') : ''
+        a ? a.exemples.map((x) => [x.nom, x.prenom, x.commune, x.obs, x.origine,
+          x.conjointNom, x.conjointPrenom, x.pereNom, x.perePrenom,
+          x.mereNom, x.merePrenom, x.parrain, x.marraine].join(' ')).join(' ') : '',
+        c ? c.exemples.map((x) => [x.nom, x.prenom, x.ville, x.age,
+          x.naissance, x.lieu_naissance, x.deces, x.conjoint, x.pere, x.mere,
+          x.remarque, x.divers2].join(' ')).join(' ') : ''
       ].join(' '))
     });
   }
@@ -256,20 +379,20 @@ async function construire() {
 
   return {
     lignes,
-    // Les matricules Filae qu'un moissonnage a fini par rattraper. Ils ne
-    // comptent plus comme Filae (Archives ou MG fait foi), mais les taire
+    // Les matricules mg oci qu'un moissonnage a fini par rattraper. Ils ne
+    // comptent plus comme mg oci (Archives ou MG fait foi), mais les taire
     // laisserait croire que la saisie a ete perdue.
-    absorbes: [...filae.keys()].filter((n) => idlr.has(n) || mg.has(n)).length,
+    absorbes: [...mgoci.keys()].filter((n) => idlr.has(n) || mg.has(n)).length,
     sources: {
       idlr: fIdlr ? { fichier: fIdlr, ...statIdlr } : null,
       mg: fMg ? { fichier: fMg, ...statMg } : null,
-      filae: { fichier: Filae.FICHIER(), lignes: filae.size }
+      mgoci: { fichier: MgOci.FICHIER(), lignes: mgoci.size }
     },
     compte: {
       idlr: compter(tousTab, 'idlr'),
       mg: compter(tousTab, 'mg'),
       deux: compter(tousTab, 'deux'),
-      filae: compter(tousTab, 'filae')
+      mgoci: compter(tousTab, 'mgoci')
     },
 
     // Couverture de la serie : ce qu'on connait sur ce qu'elle peut porter.
@@ -286,13 +409,13 @@ async function construire() {
         idlr: compter(v, 'idlr'),
         mg: compter(v, 'mg'),
         deux: compter(v, 'deux'),
-        filae: compter(v, 'filae'),
+        mgoci: compter(v, 'mgoci'),
 
         // 13 tranches de 10 000 : 1-10 000, 10 001-20 000 ... 120 001-130 000.
         tranches: (() => {
           const T = [];
           for (let i = 0; i < 13; i++) {
-            T.push({ debut: i * 10000 + 1, fin: (i + 1) * 10000, idlr: 0, mg: 0, deux: 0, filae: 0 });
+            T.push({ debut: i * 10000 + 1, fin: (i + 1) * 10000, idlr: 0, mg: 0, deux: 0, mgoci: 0 });
           }
           for (const n of v) {
             const c = T[Math.floor((n - 1) / 10000)];
@@ -311,9 +434,9 @@ async function construire() {
 let memo = null;
 
 function signature() {
-  // filae.csv n'existe pas tant qu'aucune saisie n'a eu lieu : son apparition
+  // mgoci.csv n'existe pas tant qu'aucune saisie n'a eu lieu : son apparition
   // doit elle aussi changer la signature, d'ou le marqueur explicite.
-  const p = [SRC_IDLR(), SRC_MG(), Filae.FICHIER()].filter(Boolean);
+  const p = [SRC_IDLR(), SRC_MG(), MgOci.FICHIER()].filter(Boolean);
   return p.map((f) => {
     if (!fs.existsSync(f)) return f + ':absent';
     const s = fs.statSync(f);
@@ -324,7 +447,7 @@ function signature() {
 /**
  * Force la reconstruction au prochain appel.
  *
- * Sans ca, une saisie Filae pourrait attendre jusqu'a une minute avant
+ * Sans ca, une saisie mg oci pourrait attendre jusqu'a une minute avant
  * d'apparaitre : `index()` s'impose un plancher entre deux reconstructions
  * pour ne pas relire 39 000 actes a chaque requete. Ce plancher protege des
  * relectures subies, pas de celles qu'on declenche soi-meme.
@@ -381,17 +504,17 @@ function chercher(donnees, q) {
 const STYLE = `
 :root{color-scheme:light;--surface:#fcfcfb;--plane:#f9f9f7;--ink:#0b0b0b;--ink2:#52514e;
 --muted:#898781;--grid:#e1e0d9;--bord:rgba(11,11,11,.10);--champ:#fff;--focus:#2a78d6;
---idlr:#eda100;--mg:#008300;--deux:#2a78d6;--filae:#b81e73;
---idlr-fond:#fdf6e3;--mg-fond:#e9f5e9;--deux-fond:#e8f1fd;--filae-fond:#fceaf3}
+--idlr:#eda100;--mg:#008300;--deux:#2a78d6;--mgoci:#b81e73;
+--idlr-fond:#fdf6e3;--mg-fond:#e9f5e9;--deux-fond:#e8f1fd;--mgoci-fond:#fceaf3}
 @media(prefers-color-scheme:dark){:root:where(:not([data-theme=light])){color-scheme:dark;
 --surface:#1a1a19;--plane:#0d0d0d;--ink:#fff;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;
 --bord:rgba(255,255,255,.10);--champ:#111110;--focus:#3987e5;
---idlr:#c98500;--mg:#008300;--deux:#3987e5;--filae:#bd287a;
---idlr-fond:#2a2114;--mg-fond:#132015;--deux-fond:#111e2e;--filae-fond:#2b1122}}
+--idlr:#c98500;--mg:#008300;--deux:#3987e5;--mgoci:#bd287a;
+--idlr-fond:#2a2114;--mg-fond:#132015;--deux-fond:#111e2e;--mgoci-fond:#2b1122}}
 :root[data-theme=dark]{color-scheme:dark;--surface:#1a1a19;--plane:#0d0d0d;--ink:#fff;
 --ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--bord:rgba(255,255,255,.10);--champ:#111110;
---focus:#3987e5;--idlr:#c98500;--mg:#008300;--deux:#3987e5;--filae:#bd287a;
---idlr-fond:#2a2114;--mg-fond:#132015;--deux-fond:#111e2e;--filae-fond:#2b1122}
+--focus:#3987e5;--idlr:#c98500;--mg:#008300;--deux:#3987e5;--mgoci:#bd287a;
+--idlr-fond:#2a2114;--mg-fond:#132015;--deux-fond:#111e2e;--mgoci-fond:#2b1122}
 *{box-sizing:border-box}html{background:var(--plane)}html,body{margin:0;height:100%}
 body{background:var(--plane);color:var(--ink);
 font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
@@ -446,24 +569,48 @@ border:1px solid transparent;transition:border-color .1s}
 .faxe span{flex:1;text-align:center;font-size:10px;color:var(--muted);
 font-variant-numeric:tabular-nums}
 .couv-note{font-size:11px;color:var(--muted);margin-top:6px}
-/* Le bouton de saisie porte le rose de Filae : on sait ce qu'il produit
+/* Le bouton de saisie porte le rose de mg oci : on sait ce qu'il produit
    avant de l'avoir ouvert. */
-.fl-ouvrir{border-color:var(--filae);color:var(--filae);font-weight:600}
-.fl-ouvrir:hover{background:var(--filae-fond)}
-dialog.fl{border:1px solid var(--bord);border-radius:12px;padding:0;max-width:640px;width:92vw;
-background:var(--surface);color:var(--ink);box-shadow:0 12px 40px rgba(0,0,0,.28)}
+.fl-ouvrir{border-color:var(--mgoci);color:var(--mgoci);font-weight:600}
+.fl-ouvrir:hover{background:var(--mgoci-fond)}
+dialog.fl{border:1px solid var(--bord);border-radius:12px;padding:0;max-width:660px;width:92vw;
+background:var(--surface);color:var(--ink);box-shadow:0 12px 40px rgba(0,0,0,.28);
+/* Cinq blocs ne tiennent pas sur un ecran d ordinateur portable : la
+   boite defile plutot que de pousser le bouton Enregistrer hors champ. */
+max-height:90vh;overflow:auto}
 dialog.fl::backdrop{background:rgba(0,0,0,.42)}
 dialog.fl form{display:block;padding:18px 20px 16px;border:0;background:none;margin:0}
 dialog.fl h2{font-size:15px;font-weight:650;margin:0 0 4px}
 dialog.fl h2::before{content:"";display:inline-block;width:10px;height:10px;border-radius:3px;
-background:var(--filae);margin-right:8px;vertical-align:1px}
-.fl-note{font-size:12px;color:var(--ink2);margin:0 0 14px}
-.fl-grille{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
-.fl-grille label{gap:4px}
-.fl-grille input{width:100%}
-.req{color:var(--filae)}
+background:var(--mgoci);margin-right:8px;vertical-align:1px}
+.fl-note{font-size:12px;color:var(--ink2);margin:0 0 16px}
+/* Un bloc par groupe de champs. L'intitule reprend la graisse des sous-titres
+   de la couverture : c'est le meme role — dire ou l'on est avant de lire. */
+.fl-bloc{border:0;padding:0;margin:0 0 18px;min-width:0}
+.fl-bloc legend{display:block;width:100%;padding:0 0 6px;margin:0 0 11px;
+font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;
+color:var(--muted);border-bottom:1px solid var(--bord)}
+/* La grille de saisie. Toute la mise en page tient dans ces quatre regles,
+   et chacune repare un desalignement precis. */
+/* auto-FILL et non auto-fit : auto-fit supprime les pistes vides, si bien que
+   « L'acte » et « Notes », qui n'ont que deux champs, les etalaient sur toute
+   la largeur pendant que « Famille » en tenait trois. Les pistes conservees,
+   un champ vaut une piste dans les cinq blocs — les colonnes se superposent
+   donc d'un bloc a l'autre, quel que soit le nombre de champs. */
+.fl-grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));
+gap:13px 14px;align-items:end}
+/* Un libelle qui passe sur deux lignes (« Numéro de matricule » en etroit)
+   ferait descendre SON champ et lui seul. Cale par le bas : les champs d'une
+   meme ligne restent alignes, c'est le libelle qui monte. */
+.fl-grille label{gap:5px;min-width:0}
+/* Hauteur imposee : un <select> et un <input> ne se calculent pas pareil
+   d'un navigateur a l'autre, et le menu du type d'acte depassait son voisin
+   de deux pixels. 34 px laissent la ligne de texte respirer (18,1 px) dans
+   les 12 px de marge interne. */
+.fl-grille input,.fl-grille select{width:100%;height:34px}
+.req{color:var(--mgoci)}
 .fl-err{margin:12px 0 0;padding:9px 11px;border-radius:7px;font-size:12.5px;
-background:var(--filae-fond);color:var(--ink);border-left:3px solid var(--filae)}
+background:var(--mgoci-fond);color:var(--ink);border-left:3px solid var(--mgoci)}
 .fl-pied{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .etat{padding:9px 18px;font-size:12px;color:var(--ink2);border-bottom:1px solid var(--bord);
 display:flex;justify-content:space-between;gap:12px}
@@ -475,14 +622,22 @@ font-weight:500;color:var(--ink2);font-size:11px;text-transform:uppercase;letter
 padding:8px 12px;border-bottom:1px solid var(--grid);white-space:nowrap}
 tbody td{padding:8px 12px;border-bottom:1px solid var(--grid);vertical-align:top;max-width:300px}
 .coupe{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Les deux colonnes de parents : ce qu on vient chercher, donc lisibles
+   sans effort. Le gris des cases vides dit « non relevé » sans bruit. */
+td.parent{max-width:190px}
+/* Le type d acte : MG n en donne pas, la case vide doit dire « non relevé »
+   et non « aucun acte » — meme tiret gris que pour les parents. */
+td.type{max-width:170px}
+td.parent:empty::after,td.parent .coupe:empty::after,
+td.type:empty::after,td.type .coupe:empty::after{content:"—";color:var(--muted)}
 /* La couleur de provenance : un fond tres pale + un liseré franc a gauche.
    Un aplat sature sur toute la ligne rendrait le texte illisible. */
 tr.idlr{background:var(--idlr-fond)}tr.mg{background:var(--mg-fond)}tr.deux{background:var(--deux-fond)}
-tr.filae{background:var(--filae-fond)}
+tr.mgoci{background:var(--mgoci-fond)}
 tr.idlr td:first-child{box-shadow:inset 3px 0 var(--idlr)}
 tr.mg td:first-child{box-shadow:inset 3px 0 var(--mg)}
 tr.deux td:first-child{box-shadow:inset 3px 0 var(--deux)}
-tr.filae td:first-child{box-shadow:inset 3px 0 var(--filae)}
+tr.mgoci td:first-child{box-shadow:inset 3px 0 var(--mgoci)}
 .prov{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:11.5px;white-space:nowrap}
 .num{font-variant-numeric:tabular-nums}
 td.mgnum{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
@@ -516,7 +671,7 @@ function legende(v) {
     item('idlr', 'Archives seulement', v.idlr) +
     item('mg', 'MG seulement', v.mg) +
     item('deux', 'Les deux', v.deux) +
-    item('filae', 'Filae (saisie)', v.filae) +
+    item('mgoci', 'mg oci (saisie)', v.mgoci) +
     (v.hors ? item('grid', 'hors plage 1\u2013130 000', v.hors, 'horsplage') : '') +
     '</div>';
 }
@@ -532,7 +687,7 @@ function barreGlobale(v) {
   const lg = (n) => (n / v.total * 100).toFixed(3);
 
   // Plancher de 2 px : un matricule vaut 0,0008 % des 130 000, soit un
-  // segment de 0,01 px — invisible. Une saisie Filae qui n'apparait pas
+  // segment de 0,01 px — invisible. Une saisie mg oci qui n'apparait pas
   // serait prise pour une saisie perdue. La proportion est donc legerement
   // faussee vers le haut pour les tres petits effectifs ; les nombres exacts
   // restent dans la legende juste au-dessus.
@@ -542,7 +697,7 @@ function barreGlobale(v) {
   // Meme ordre que dans la frise, lue de bas en haut : les deux visuels se
   // superposent mentalement au lieu de se contredire.
   return '<div class=piste role=img aria-label="Couverture de la serie entiere">' +
-    seg('idlr', v.idlr) + seg('deux', v.deux) + seg('mg', v.mg) + seg('filae', v.filae) +
+    seg('idlr', v.idlr) + seg('deux', v.deux) + seg('mg', v.mg) + seg('mgoci', v.mgoci) +
     '</div>';
 }
 
@@ -559,7 +714,7 @@ function barreGlobale(v) {
  */
 function frise(v) {
   const colonnes = v.tranches.map((x) => {
-    const connus = x.idlr + x.deux + x.mg + x.filae;
+    const connus = x.idlr + x.deux + x.mg + x.mgoci;
     // Meme plancher que la barre, et pour la meme raison.
     const h = (n) => 'max(2px,' + (n / 10000 * 100).toFixed(2) + '%)';
     // connus/10000*100 arrondi au dixieme : 6137 -> 61,4 %
@@ -567,13 +722,13 @@ function frise(v) {
     const titre = 'MG ' + nf(x.debut) + ' a ' + nf(x.fin) + '\n' +
       nf(connus) + ' connus sur 10 000 (' + pct + ' %)\n' +
       'Archives seul ' + nf(x.idlr) + '\nLes deux ' + nf(x.deux) + '\nMG seul ' + nf(x.mg) +
-      (x.filae ? '\nFilae ' + nf(x.filae) : '');
+      (x.mgoci ? '\nmg oci ' + nf(x.mgoci) : '');
     // Le rose est en tete du DOM donc en haut de la colonne : une saisie
-    // Filae represente quelques unites sur 10 000, elle serait invisible
+    // mg oci represente quelques unites sur 10 000, elle serait invisible
     // coincee entre deux gros segments.
     return '<div class=fcol data-debut="' + x.debut + '" data-fin="' + x.fin +
       '" title="' + esc(titre) + '">' +
-      ['filae', 'mg', 'deux', 'idlr'].map((p) => !x[p] ? '' :
+      ['mgoci', 'mg', 'deux', 'idlr'].map((p) => !x[p] ? '' :
         '<i style="height:' + h(x[p]) + ';background:var(--' + p + ')"></i>').join('') +
       '</div>';
   }).join('');
@@ -587,25 +742,44 @@ function frise(v) {
 }
 
 /**
- * Le formulaire de saisie Filae, engendre depuis Filae.SAISIE.
+ * Le formulaire de saisie mg oci, engendre depuis MgOci.groupes().
  *
  * Les champs ne sont pas ecrits en dur ici : c'est la meme liste qui sert a
  * la validation cote serveur. Un champ ajoute la-bas apparait ici, et un
  * champ propose ici ne peut pas etre jete en silence a l'arrivee.
+ *
+ * Le decoupage en blocs vient de la meme liste. Quatorze champs a la file
+ * obligeraient a lire chaque etiquette pour trouver le pere ; cinq intitules
+ * disent d'abord OU regarder, les etiquettes ensuite quoi ecrire. Un fieldset
+ * plutot qu'un simple titre : c'est ce qu'un lecteur d'ecran annonce avant
+ * chaque champ du bloc, « Famille — Père » au lieu de « Père » seul.
  */
-function formulaireFilae() {
+function formulaireMgOci() {
   const champ = (c) =>
     '<label>' + esc(c.libelle) + (c.requis ? ' <b class=req>*</b>' : '') +
-    '<input id="fl-' + c.cle + '" maxlength=200' +
-    (c.indice ? ' placeholder="' + esc(c.indice) + '"' : '') +
-    (c.requis ? ' required' : '') + '></label>';
+    (c.choix
+      // La premiere option est vide, et c'est elle qui est retenue au
+      // depart : le type d'acte n'est pas toujours su, et un menu ouvert sur
+      // « Acte de naissance » enregistrerait une naissance a chaque saisie
+      // ou l'on n'y touche pas.
+      ? '<select id="fl-' + c.cle + '"><option value="">— non précisé —</option>' +
+        c.choix.map((o) => '<option value="' + esc(o.v) + '">' + esc(o.t) + '</option>').join('') +
+        '</select>'
+      : '<input id="fl-' + c.cle + '" maxlength=200' +
+        (c.indice ? ' placeholder="' + esc(c.indice) + '"' : '') +
+        (c.requis ? ' required' : '') + '>') +
+    '</label>';
+
+  const bloc = (g) =>
+    '<fieldset class=fl-bloc><legend>' + esc(g.titre) + '</legend>' +
+    '<div class=fl-grille>' + g.champs.map(champ).join('') + '</div></fieldset>';
 
   return '<dialog id=dlg class=fl>' +
-    '<form id=flform onsubmit="enregistrerFilae();return false">' +
-    '<h2>Nouveau matricule Filae</h2>' +
+    '<form id=flform onsubmit="enregistrerMgOci();return false">' +
+    '<h2>Nouveau matricule mg oci</h2>' +
     '<p class=fl-note>Pour un numéro absent des Archives <b>et</b> de MG. ' +
     'Il apparaitra en rose dans les résultats et dans les deux graphiques.</p>' +
-    '<div class=fl-grille>' + Filae.SAISIE.map(champ).join('') + '</div>' +
+    MgOci.groupes().map(bloc).join('') +
     '<p class=fl-err id=fl-err hidden></p>' +
     '<div class=fl-pied>' +
     '<button type=button onclick="dlg.close()">Annuler</button>' +
@@ -640,7 +814,7 @@ function page(donnees) {
     <option value=idlr>Archives seulement</option>
     <option value=mg>MG seulement</option>
     <option value=deux>Les deux</option>
-    <option value=filae>Filae (saisie)</option>
+    <option value=mgoci>mg oci (saisie)</option>
   </select></label>
   <label>MG de<input class=mini type=number id=matMin min=1 max=130000 placeholder=1></label>
   <label>à<input class=mini type=number id=matMax min=1 max=130000 placeholder=130000></label>
@@ -648,11 +822,11 @@ function page(donnees) {
   <label>Origine<input type=text id=origine placeholder="Inde"></label>
   <button class=p type=submit>Chercher</button>
   <button type=button onclick="vider()">Effacer</button>
-  <button type=button class=fl-ouvrir onclick="ouvrirFilae()"
-    title="Saisir un matricule absent des deux bases">+ Matricule Filae</button>
+  <button type=button class=fl-ouvrir onclick="ouvrirMgOci()"
+    title="Saisir un matricule absent des deux bases">+ Matricule mg oci</button>
 </form>
 
-${formulaireFilae()}
+${formulaireMgOci()}
 
 ${legende(v)}
 
@@ -679,12 +853,12 @@ ${legende(v)}
 const $=i=>document.getElementById(i);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const nf=v=>String(v==null?0:v).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'\\u202f');
-const LIB={idlr:'Archives',mg:'MG',deux:'Les deux',filae:'Filae'};
-const FILAE_CHAMPS=${JSON.stringify(Filae.SAISIE.map((c) => c.cle))};
+const LIB={idlr:'Archives',mg:'MG',deux:'Les deux',mgoci:'mg oci'};
+const MGOCI_CHAMPS=${JSON.stringify(MgOci.SAISIE.map((c) => c.cle))};
 let page=0,dernier=null;
 
-/* ---- saisie d'un matricule Filae ---- */
-function ouvrirFilae(){
+/* ---- saisie d'un matricule mg oci ---- */
+function ouvrirMgOci(){
   $('fl-err').hidden=true;
   /* Le numéro cherché est le plus souvent celui qu'on vient de ne pas trouver :
      on le pré-remplit s'il est identifiable, plutôt que de le faire retaper. */
@@ -695,12 +869,12 @@ function ouvrirFilae(){
   $('fl-matricule').focus();
 }
 
-async function enregistrerFilae(){
+async function enregistrerMgOci(){
   const b=$('fl-ok'),err=$('fl-err');
   b.disabled=true;err.hidden=true;
-  const corps={};for(const c of FILAE_CHAMPS)corps[c]=$('fl-'+c).value;
+  const corps={};for(const c of MGOCI_CHAMPS)corps[c]=$('fl-'+c).value;
   try{
-    const r=await(await fetch('/filae',{method:'POST',
+    const r=await(await fetch('/mgoci',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(corps)})).json();
     if(!r.ok){err.textContent=r.message;err.hidden=false;b.disabled=false;return;}
     /* La barre et la frise sont calculées par le serveur : il faut recharger
@@ -726,15 +900,15 @@ async function go(p){
     if(!r.total){$('zone').innerHTML='<div class=vide><b>Aucun résultat</b>Élargis la recherche, ou retire un filtre.</div>';$('pied').hidden=true;return;}
     $('zone').innerHTML='<table><thead><tr>'+
       '<th>Provenance</th><th>MG</th><th>Identité (MG)</th><th>Nom (Archives)</th>'+
-      '<th>Origine</th><th>Commune</th><th>Date</th><th>Actes</th><th>Notes</th>'+
+      '<th>Père</th><th>Mère</th><th>Conjoint</th><th>Origine</th><th>Commune</th><th>Date</th><th>Type</th><th>Actes</th><th>Notes</th>'+
       '</tr></thead><tbody>'+r.rows.map(l=>
         '<tr class="'+l.provenance+'">'+
-        // Une saisie Filae qu'un moissonnage a depuis rattrapée garde une
+        // Une saisie mg oci qu'un moissonnage a depuis rattrapée garde une
         // pastille rose : la ligne dit vrai sur sa source, sans effacer que
         // le numéro a d'abord été saisi à la main.
         '<td><span class=prov><i class=pastille style="background:var(--'+l.provenance+')"></i>'+LIB[l.provenance]+
-        (l.dansFilae&&l.provenance!=='filae'
-          ? ' <i class=pastille title="aussi saisi dans Filae" style="background:var(--filae)"></i>':'')+
+        (l.dansMgOci&&l.provenance!=='mgoci'
+          ? ' <i class=pastille title="aussi saisi dans mg oci" style="background:var(--mgoci)"></i>':'')+
         '</span></td>'+
         // Le numero ne renvoie a cherchemg.fr que si MG le connait : sur une
         // ligne jaune, ce lien tomberait sur « pas encore presente ».
@@ -746,9 +920,18 @@ async function go(p){
         '<td><span class=coupe title="'+esc(l.nom)+'">'+(l.urlIdlr
           ? '<a class=acte href="'+esc(l.urlIdlr)+'" target=_blank rel=noopener title="Voir cet acte sur iledelareunion-archive.com">'+esc(l.nom)+'</a>'
           : esc(l.nom))+'</span></td>'+
+        // Père et mère, chacun dans sa colonne : c'est ce qu'on vient
+        // chercher, ça ne se lit pas derrière un préfixe.
+        '<td class=parent><span class=coupe title="'+esc(l.pere)+'">'+esc(l.pere)+'</span></td>'+
+        '<td class=parent><span class=coupe title="'+esc(l.mere)+'">'+esc(l.mere)+'</span></td>'+
+        '<td><span class=coupe title="'+esc(l.conjoint)+'">'+esc(l.conjoint)+'</span></td>'+
         '<td><span class=coupe title="'+esc(l.origine)+'">'+esc(l.origine)+'</span></td>'+
         '<td><span class=coupe>'+esc(l.commune)+'</span></td>'+
         '<td class=num>'+esc(l.date)+'</td>'+
+        // Le type en toutes lettres, pas le code : « N » ne se lit pas.
+        // Plusieurs actes, plusieurs types — le titre donne la liste
+        // entiere quand la cellule la tronque.
+        '<td class=type><span class=coupe title="'+esc(l.type)+'">'+esc(l.type)+'</span></td>'+
         '<td class=num>'+(l.nActes||'')+'</td>'+
         '<td><span class=coupe title="'+esc(l.notes)+'">'+esc(l.notes)+'</span></td>'+
         '</tr>').join('')+'</tbody></table>';
@@ -794,7 +977,7 @@ if(amorce)go(Number(P.get('page')||0));
  *
  * Sans plafond, un client qui envoie un flux sans fin ferait grossir la
  * chaine jusqu'a tuer le processus : le serveur n'attendait jusqu'ici aucun
- * corps, cette porte s'ouvre avec la saisie Filae.
+ * corps, cette porte s'ouvre avec la saisie mg oci.
  */
 function lireCorps(req, max) {
   const plafond = max || 64 * 1024;
@@ -811,12 +994,12 @@ function lireCorps(req, max) {
 }
 
 /**
- * POST /filae — enregistre un matricule saisi a la main.
+ * POST /mgoci — enregistre un matricule saisi a la main.
  *
  * La regle « absent des deux bases » se verifie ici, contre l'index en
  * memoire : c'est le seul endroit qui connait a la fois Archives et MG.
  */
-async function posterFilae(req) {
+async function posterMgOci(req) {
   let brut;
   try { brut = JSON.parse(await lireCorps(req) || '{}'); }
   catch (e) { return { ok: false, message: 'Saisie illisible : ' + e.message }; }
@@ -827,7 +1010,7 @@ async function posterFilae(req) {
     return l ? { idlr: 'les Archives', mg: 'MG', deux: 'les deux bases' }[l.provenance] || null : null;
   };
 
-  const r = await Filae.ajouter(brut, connu);
+  const r = await MgOci.ajouter(brut, connu);
   if (r.ok) oublier();   // la barre et la frise doivent bouger tout de suite
   return r;
 }
@@ -847,8 +1030,8 @@ function demarrer() {
   // proprement. Sinon writeHead(500) sur une reponse deja ouverte tue le
   // processus et le navigateur ne voit qu'une connexion coupee.
   try {
-    if (req.method === 'POST' && u.pathname === '/filae') {
-      const r = await posterFilae(req);
+    if (req.method === 'POST' && u.pathname === '/mgoci') {
+      const r = await posterMgOci(req);
       res.writeHead(r.ok ? 201 : 400, {
         'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'
       });
@@ -883,4 +1066,4 @@ function demarrer() {
 
 if (require.main === module) demarrer();
 
-module.exports = { construire, chercher, empreinte, norm, demarrer, oublier, page, legende, barreGlobale, frise, formulaireFilae };
+module.exports = { construire, chercher, empreinte, norm, demarrer, oublier, page, legende, barreGlobale, frise, formulaireMgOci };

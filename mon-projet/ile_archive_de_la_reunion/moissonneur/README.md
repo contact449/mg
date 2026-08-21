@@ -98,14 +98,52 @@ CSV, une ligne par acte. Colonnes :
 
 ```
 matricule,type_acte,commune,date_iso,nom,prenom,sexe,
-conjoint_nom,conjoint_prenom,age,origine,obs,numero,url_demande_photo
+conjoint_nom,conjoint_prenom,pere_nom,pere_prenom,mere_nom,mere_prenom,
+pere_decede,mere_decede,parrain,marraine,
+age,origine,obs,numero,url_demande_photo
 ```
+
+**Ce que chaque type d’acte porte réellement** (`SCHEMA.md`, validé sur de
+vraies pages) :
+
+| Type | Entourage donné par le site |
+|---|---|
+| Naissance | `pere_prenom` (82 %), `mere_nom` (98 %), `mere_prenom` (96 %), `pere_decede`, `mere_decede`, `parrain` (22 %), `marraine` |
+| Décès | `pere_decede`, `mere_decede` |
+| Mariage, promesse, divorce | `conjoint_*`, `pere_*`, `mere_*` |
+
+> **Une naissance donne le prénom du père et le nom complet de la mère**,
+> vérifié le 21/08/2026 sur une page réelle : 82 %, 98 % et 96 % des actes
+> sondés. `SCHEMA.md` affirmait le contraire ; il était périmé, il est corrigé.
+>
+> Le site ne donne **pas** le NOM du père sur une naissance (0 %) : c’est le
+> patronyme de l’enfant, déjà en colonne `nom`. `pere_nom` reste donc vide
+> pour les naissances, et on ne l’y recopie pas : 11 % de ces actes sont des
+> reconnaissances, où l’enfant peut ne pas porter le nom du père — là
+> précisément où l’inférence serait fausse.
+>
+> Le `obs` d’une naissance, lui, n’apporte rien : sur 13 075 naissances
+> relevées, 52 mentionnent un parent (0,4 %).
 
 Pour ne garder que les personnes matriculées : filtre les lignes où `matricule`
 n'est pas vide (Excel/LibreOffice, ou `awk -F, '$1!=""' actes.csv`).
 
-> Courtoisie : préviens le webmaster avant de lancer (User-Agent identifiant
-> déjà présent dans les requêtes).
+> **Courtoisie : préviens le webmaster avant une récolte complète.**
+>
+> **webmaster@iledelareunion-archive.com** — adresse publiée sur la page
+> d’accueil du site. Le site est tenu par l’**association Arbre**, dont les
+> relevés sont faits par des bénévoles (« dépouilleurs ») et qui vit d’une
+> cotisation de 10 € par an.
+>
+> Une récolte complète, c’est ~35 000 requêtes sur 28 h de leur bande
+> passante. Le User-Agent t’identifie déjà dans leurs journaux
+> (`+contact: webmaster@oci-express.re`) — c’est **notre** adresse, celle par
+> laquelle ils peuvent nous joindre, pas la leur. Un courriel préalable leur
+> évite de découvrir le trafic sans savoir d’où il vient, et vaut mieux qu’un
+> blocage d’IP décidé dans l’urgence.
+>
+> Le délai entre requêtes est réglable : `IDLR_THROTTLE_MS=5000` ralentit si
+> on te le demande.
 
 
 ## Developper en local
@@ -153,6 +191,80 @@ npm run search     # node search.cjs           (port 8091)
 npm run dashboard  # node serve.cjs            (port 8080)
 npm test           # les deux selftests, hors ligne
 ```
+
+## Suivre une récolte en cours
+
+```bash
+IDLR_CK=checkpoint-2026.json IDLR_OUT=actes-2026.csv IDLR_HB=heartbeat-2026 \
+  npm run suivi-2026        # puis http://localhost:8080
+```
+
+L’écran donne le nombre d’actes récoltés, l’avancement, la commune en cours,
+le rythme, l’heure de fin estimée et une vignette par commune. Il se
+rafraîchit tout seul.
+
+**Deux pourcentages, et il faut les deux.**
+
+| | Répond à |
+|---|---|
+| **Avancement** | où en est le TRAVAIL |
+| **% du relevé précédent** (sous les actes) | si la MOISSON est normale |
+
+Le second est un garde-fou : à mi-parcours on doit être à peu près à la
+moitié des 39 369 actes du relevé précédent. Un écart franc signale un
+problème — site qui a changé, filtre trop strict — avant qu’on ait perdu 28 h.
+
+> **L’avancement est pondéré par le coût réel des cases.** Compter les cases
+> faites traiterait un bucket de 400 actes comme un de 4 000, alors que le
+> temps se passe en PAGES (une requête par tranche de 50 actes). Les
+> premières communes étant les plus petites, ce comptage annonçait 15 h là où
+> le vrai total est de 28 h. Le tableau de bord lit donc la taille de chaque
+> case dans le `checkpoint.json` du relevé précédent et s’en sert comme d’un
+> devis : ce qui reste est chiffré, pas extrapolé. Sans ce fichier il
+> retombe sur le comptage simple.
+
+---
+
+## Rattraper les noms de parents
+
+`actes.csv` porte le **conjoint** depuis toujours (`conjoint_nom`,
+`conjoint_prenom`) : 2 963 actes, soit tous les mariages, promesses et
+divorces. Le **père** et la **mère** en étaient absents — non parce que le
+site les cache, mais parce que `recordToRow()` ne les recopiait pas. Le
+parser les lisait déjà (`pere.nom`, `pere.prenom`, `mere.nom`,
+`mere.prenom`).
+
+Quatre colonnes ont été ajoutées : `pere_nom`, `pere_prenom`, `mere_nom`,
+`mere_prenom`. Elles ne se rempliront que lors d'un moissonnage.
+
+```bash
+npm start -- --migrer                 # aligne actes.csv sans rien récolter
+npm run refresh -- --types=M,PM,DIV   # ne repasse que sur les actes concernés
+npm run import                        # actes.csv -> actes.db
+```
+
+**`--types` évite de tout refaire.** Les noms de parents ne figurent que sur
+les actes qui portent ces colonnes — les mariages, pour l'essentiel. Sans
+l'option, il faudrait repasser sur les 39 000 actes dont 36 000
+n'apprendraient rien.
+
+**La migration est automatique et sans perte.** Le moissonneur ÉCRIT EN FIN
+DE FICHIER : ajouter une colonne sans réaligner l'en-tête produirait des
+lignes plus larges que leur en-tête, et le fichier deviendrait incohérent en
+silence — le pire des dégâts, parce qu'il ne se voit qu'à la relecture.
+`harvest.cjs` réaligne donc `actes.csv` avant toute écriture, en remettant
+les colonnes **par nom** et jamais par position. L'original est conservé en
+`actes.csv.avant-migration`. Une colonne ancienne que le moissonneur ne
+connaîtrait pas provoque un **refus**, pas un abandon silencieux.
+
+Vérifié sur les 39 369 lignes réelles : **551 166 valeurs comparées, aucun
+écart**, y compris les 1 889 champs `obs` contenant une virgule et les 75
+contenant des guillemets.
+
+`search.cjs` s'adapte tout seul : il lit le schéma de `actes.db` au démarrage
+et ne demande les colonnes parents que si elles existent. Une base ancienne
+continue donc de répondre — les demander sans vérifier ferait échouer la
+requête entière, donc plus aucun résultat, pour une colonne d'appoint.
 
 En local, ouvre simplement `http://localhost:8080` et `http://localhost:8091`.
 Pour changer de port ou de fichier :

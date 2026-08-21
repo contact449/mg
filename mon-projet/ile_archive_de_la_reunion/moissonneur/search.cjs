@@ -37,6 +37,23 @@ function communes() {
 }
 const COMMUNES = communes();
 
+/**
+ * Les colonnes que la base porte REELLEMENT.
+ *
+ * Les noms de parents n'existent que dans un actes.db importe depuis un
+ * actes.csv posterieur a leur ajout au moissonneur. Les demander a une base
+ * plus ancienne ferait echouer la requete entiere — donc plus aucun resultat,
+ * pour une colonne d'appoint. On lit le schema une fois et on s'y adapte.
+ */
+const COLONNES = (() => {
+  try { return new Set(db.prepare('PRAGMA table_info(actes)').all().map((c) => c.name)); }
+  catch { return new Set(); }
+})();
+// Colonnes d'entourage, toutes optionnelles : une base importee avant leur
+// ajout n'en a aucune, et les demander la ferait echouer la requete entiere.
+const ENTOURAGE = ['pere_nom', 'pere_prenom', 'mere_nom', 'mere_prenom',
+  'pere_decede', 'mere_decede', 'parrain', 'marraine'].filter((c) => COLONNES.has(c));
+
 function search(q) {
   const cond = [], args = [];
   if (q.nom)     { cond.push('nom LIKE ?');       args.push(String(q.nom).toUpperCase() + '%'); }
@@ -53,7 +70,10 @@ function search(q) {
 
   const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
   const page = Math.max(0, parseInt(q.page, 10) || 0);
-  const sql = `SELECT type_acte,commune,date_iso,nom,prenom,sexe,age,conjoint_nom,conjoint_prenom,matricule,obs
+  const champs = ['type_acte', 'commune', 'date_iso', 'nom', 'prenom', 'sexe', 'age',
+    'conjoint_nom', 'conjoint_prenom', 'matricule', 'obs']
+    .concat(ENTOURAGE);
+  const sql = `SELECT ${champs.join(',')}
                FROM actes ${where} ORDER BY nom,prenom LIMIT ? OFFSET ?`;
   const rows = db.prepare(sql).all(...args, PAGE + 1, page * PAGE);
   const hasMore = rows.length > PAGE;
@@ -291,7 +311,11 @@ tbody tr:hover{background:var(--muted)}
 .center{text-align:center}
 td.strong{font-weight:600;color:var(--foreground)}
 td.muted{color:var(--muted-foreground)}
-td.obs{color:var(--muted-foreground);max-width:520px}
+td.obs{color:var(--muted-foreground);max-width:380px}
+/* Les colonnes de parents : ce qu on vient chercher, donc lisibles sans
+   effort. Le tiret gris dit « non relevé » sans faire de bruit. */
+td.parent{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.parent:empty::after{content:"—";color:var(--muted-foreground)}
 /* type d'acte : libellé lisible + pastille de catégorie (repère visuel discret) */
 .tag{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;white-space:nowrap}
 .dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted-foreground)}
@@ -331,7 +355,7 @@ button.busy::after{content:"";position:absolute;inset:0;margin:auto;width:15px;h
 </form>
 <div class=meta id=meta></div>
 <div class=tablewrap id=tw><table><thead><tr>
-<th>Type</th><th>Commune</th><th>Date</th><th>Nom</th><th>Prénom</th><th>Sexe</th><th>Âge</th><th>Matricule</th><th>Obs</th><th>Conjoint</th>
+<th>Type</th><th>Commune</th><th>Date</th><th>Nom</th><th>Prénom</th><th>Sexe</th><th>Âge</th><th>Matricule</th><th>Père</th><th>Mère</th><th>Conjoint</th><th>Obs</th>
 </tr></thead><tbody id=tb></tbody></table></div>
 <div class=pg id=pg></div>
 </div><script>
@@ -342,7 +366,7 @@ const reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
 const TYPE={N:'Naissance',D:'Décès',M:'Mariage',PM:'Promesse',DIV:'Divorce'};
 const IC_SEARCH='<svg viewBox="0 0 24 24" fill=none stroke-linecap=round stroke-linejoin=round><circle cx=11 cy=11 r=7/><path d="m21 21-4.35-4.35"/></svg>';
 const IC_EMPTY='<svg viewBox="0 0 24 24" fill=none stroke-linecap=round stroke-linejoin=round><path d="M3 7l9-4 9 4-9 4-9-4Z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11.2V21"/></svg>';
-const state=(ic,t,s)=>'<tr><td colspan=10><div class=state>'+ic+'<b>'+t+'</b><p>'+s+'</p></div></td></tr>';
+const state=(ic,t,s)=>'<tr><td colspan=12><div class=state>'+ic+'<b>'+t+'</b><p>'+s+'</p></div></td></tr>';
 function qs(page){
  const p=new URLSearchParams();
  if($('nom').value)p.set('nom',$('nom').value.trim());
@@ -357,14 +381,29 @@ function qs(page){
  return p.toString();
 }
 function row(x){
- const conj=[x.conjoint_nom,x.conjoint_prenom].filter(Boolean).join(' ');
+ // Conjoint, pere et mere dans une seule colonne : trois colonnes de plus
+ // seraient vides sur 92 % des lignes, l entourage n etant releve que sur
+ // les mariages. Le titre donne le texte entier si la cellule le tronque.
+ const paire=(a,b)=>[a,b].filter(Boolean).join(' ');
+ // Père et mère ont chacun leur colonne : c'est ce qu'on vient chercher.
+ // Le site donne le PRÉNOM du père et le NOM COMPLET de la mère, sur les
+ // trois types d'acte. Jamais le nom du père : c'est le patronyme de la
+ // personne, déjà en colonne Nom — on ne l'y recopie pas, 11 % des
+ // naissances sont des reconnaissances où l'enfant porte un autre nom.
+ const mort=(v,d)=>v?(d?v+' †':v):(d?'†':'');
+ const pere=mort(paire(x.pere_nom,x.pere_prenom),x.pere_decede);
+ const mere=mort(paire(x.mere_nom,x.mere_prenom),x.mere_decede);
+ const conj=paire(x.conjoint_nom,x.conjoint_prenom);
  const t=x.type_acte||'';
  const tag='<span class=tag><i class="dot dot-'+esc(t)+'"></i>'+(TYPE[t]||esc(t))+'</span>';
  const mat=x.matricule?'<span class="mat num">'+esc(x.matricule)+'</span>':'';
  return '<tr><td>'+tag+'</td><td>'+esc(x.commune)+'</td><td class=num>'+esc(x.date_iso)
   +'</td><td class=strong>'+esc(x.nom)+'</td><td>'+esc(x.prenom)+'</td><td class=center>'+esc(x.sexe)
   +'</td><td class="num center">'+esc(x.age)+'</td><td>'+mat
-  +'</td><td class=obs title="'+esc(x.obs)+'">'+esc(x.obs)+'</td><td class=muted>'+esc(conj)+'</td></tr>';
+  +'</td><td class=parent title="'+esc(pere)+'">'+esc(pere)+'</td>'
+  +'<td class=parent title="'+esc(mere)+'">'+esc(mere)+'</td>'
+  +'<td class=muted title="'+esc(conj)+'">'+esc(conj)+'</td>'
+  +'<td class=obs title="'+esc(x.obs)+'">'+esc(x.obs)+'</td></tr>';
 }
 async function go(page){
  cur=page;

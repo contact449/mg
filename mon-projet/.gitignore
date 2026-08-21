@@ -26,6 +26,7 @@ dist/
 */moissonneur/heartbeat
 croisement_mg_idlr/resume.json
 croisement_mg_idlr/historique.json
+croisement_mg_idlr/maj_etat.json
 *.log
 
 # Bases SQLite : refabriquees depuis les CSV en quelques secondes par

@@ -29,8 +29,13 @@ naissance au moissonneur IDLR, et c'est celui-ci.
 | Fichier | Rôle |
 |---|---|
 | `harvest.cjs` | le moissonneur (réseau + les deux phases) |
+| `recherche.cjs` | la recherche d'engagés en page web locale (port 8094) |
+| `chiffres.cjs` | les chiffres clés en page web locale (port 8095) |
 | `Config.js` | **copie conforme** de `../Config.gs`, réutilisée telle quelle |
 | `Parser.js` | **copie conforme** de `../Parser.gs`, réutilisée telle quelle |
+| `Engages.js` | **copie conforme** de `../Engages.gs` : le moteur de recherche |
+| `Stats.js` | **copie conforme** de `../Stats.gs` : le calcul des agrégats |
+| `Vue.html` | **copie conforme** de `../Vue.html` : la page du tableau de bord |
 | `test/fixtures/` | pages réelles pour le selftest hors ligne |
 
 Les sorties `mg_matricules.csv`, `mg_fiches.csv` et `mg_etat.json` sont créées à
@@ -42,7 +47,10 @@ du module Apps Script, resynchronise :
 
 ```bash
 cp ../Config.gs Config.js && cp ../Parser.gs Parser.js
-node harvest.cjs --selftest      # vérifie qu'elles n'ont pas dérivé
+cp ../Engages.gs Engages.js && cp ../Stats.gs Stats.js && cp ../Vue.html Vue.html
+node harvest.cjs --selftest      # Config.js et Parser.js
+node recherche.cjs --selftest    # Config.js et Engages.js
+node chiffres.cjs --selftest     # Config.js, Stats.js et Vue.html
 ```
 
 ## Lancer
@@ -53,7 +61,20 @@ node harvest.cjs --index         # phase 1 seule (~90 s)
 node harvest.cjs --fiches        # phase 2 seule
 node harvest.cjs --limite 200    # borne la phase 2, pour un essai
 node harvest.cjs --selftest      # hors ligne, aucune requête
+
+node recherche.cjs               # la recherche d'engagés, http://localhost:8094
+node recherche.cjs --selftest    # 39 assertions, hors ligne
+
+node chiffres.cjs                # les chiffres clés,       http://localhost:8095
+node chiffres.cjs --selftest     # 37 assertions, hors ligne
 ```
+
+`recherche.cjs` et `chiffres.cjs` servent les deux écrans du module sans
+classeur : ils chargent les copies conformes dans un contexte `vm` et leur
+substituent la lecture des CSV. `chiffres.cjs` va plus loin — il sert le
+**fichier `Vue.html` du module**, chiffres injectés là où Apps Script injecte
+les siens. Voir [`../README.md`](../README.md), § « La même recherche en local »
+et § « Le même tableau de bord en local ».
 
 Pour survivre à une déconnexion SSH :
 
@@ -80,6 +101,9 @@ refaire : supprime `mg_fiches.csv`.
 | `MG_OUT` | `mg_matricules.csv` | chemin de l'index |
 | `MG_FICHES` | `mg_fiches.csv` | chemin des fiches |
 | `MG_ETAT` | `mg_etat.json` | date et compteurs du dernier index |
+| `MG_ENGAGES` | `../engages.csv` | source préférée de `recherche.cjs` |
+| `MG_SANS` | `mg_sans_numero.csv` | identités sans numéro, pour `chiffres.cjs` |
+| `PORT` / `HOST` | `8094` / `8095` | écoute de `recherche.cjs` / `chiffres.cjs` |
 | `MG_UA` | User-Agent OCI | identification auprès du site |
 
 Le throttle par défaut est volontairement poli : le site est tenu par un

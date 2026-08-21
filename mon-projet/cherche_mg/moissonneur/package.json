@@ -8,6 +8,8 @@
     "start": "node harvest.cjs",
     "index": "node harvest.cjs --index",
     "fiches": "node harvest.cjs --fiches",
-    "test": "node harvest.cjs --selftest"
+    "recherche": "node recherche.cjs",
+    "chiffres": "node chiffres.cjs",
+    "test": "node harvest.cjs --selftest && node recherche.cjs --selftest && node chiffres.cjs --selftest"
   }
 }

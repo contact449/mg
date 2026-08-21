@@ -252,6 +252,48 @@ quand même. Rien à reparamétrer quand la source change.
 > recherche sur 27 000 lignes. C'est pourquoi elle part sur **Entrée** ou sur le
 > bouton, jamais à chaque frappe.
 
+### La même recherche en local — `npm run recherche`
+
+L'écran ci-dessus a besoin d'un classeur, d'un compte Google et d'un import
+préalable. Sur le VPS, ou pendant le développement, on a le CSV sous la main et
+pas le classeur. La même recherche est donc servie en page web locale :
+
+```bash
+npm run recherche          # puis http://localhost:8094
+```
+
+**Le moteur n'est pas réécrit.** `moissonneur/Engages.js` est une copie conforme
+de `Engages.gs`, chargée dans un contexte `vm` comme `Config.js` et `Parser.js`
+le sont déjà pour le moissonneur. `mgRechercherEngages()` s'exécute donc tel
+quel : la seule pièce fournie par Node est `mgLireEngages_()`, qui rend les
+lignes du CSV là où Apps Script rendait celles de la feuille. Les deux écrans ne
+peuvent pas diverger, et le selftest refuse de passer si la copie a dérivé.
+
+| | Écran Sheets | Page locale |
+|---|---|---|
+| Source | feuille `MG_Engages` | `engages.csv`, sinon `mg_fiches.csv`, sinon `mg_matricules.csv` |
+| Filtres | identiques — **c'est le même code** | |
+| Résultats partageables | non | oui, les critères sont dans l'URL |
+| « Tous les résultats » | feuille `MG_Recherche` | `Exporter le CSV` (télécharge tout, pas la page affichée) |
+
+Mesuré sur le vrai `engages.csv` : **1 721 résultats sur 27 096 lignes en
+190 ms** pour la recherche « moutou ».
+
+Les critères passent dans l'URL, donc un signet ou un lien envoyé à un collègue
+ramène le même résultat :
+
+```
+http://localhost:8094/?texte=moutou
+http://localhost:8094/?origine=Inde&anMin=1860&anMax=1870
+http://localhost:8094/?matMin=11000&matMax=12000
+http://localhost:8094/api?texte=petan          # les mêmes résultats en JSON
+http://localhost:8094/export.csv?origine=Madagascar
+```
+
+Réglages : `PORT` (8094 par défaut), `HOST`, et `MG_ENGAGES` / `MG_FICHES` /
+`MG_OUT` pour désigner un autre fichier — les mêmes variables que le
+moissonneur, comme partout dans la chaîne.
+
 ### Tableau de bord — menu « Chiffres clés »
 
 `mgAfficherTableauDeBord()` ouvre `Vue.html` en fenêtre modale :
@@ -275,6 +317,107 @@ Palette : slots catégoriels 1 et 2, validés dans les deux modes
 `mgStatistiques()` renvoie ces mêmes chiffres en JSON si tu veux les traiter
 ailleurs. Le calcul fait **un seul parcours** des feuilles : compte quelques
 secondes sur une base complète, c'est une action de menu, pas un appel d'API.
+
+### Le même tableau de bord en local — `npm run chiffres`
+
+```bash
+npm run chiffres           # puis http://localhost:8095
+```
+
+**Ni le calcul ni la vue ne sont réécrits.** `moissonneur/Stats.js` et
+`moissonneur/Vue.html` sont des copies conformes de `Stats.gs` et `Vue.html` :
+`mgStatistiques()` s'exécute tel quel, et la page servie **est** le fichier du
+module. Apps Script y injecte ses chiffres par le scriptlet `<?!= donnees ?>`,
+Node y injecte les siens au même endroit. Les deux tableaux de bord ne peuvent
+donc pas donner des nombres différents ni dessiner deux graphiques distincts.
+
+Ce que Node fournit, c'est le **classeur** : trois fausses feuilles adossées aux
+CSV (`mg_matricules.csv` → `MG_Matricules`, `mg_fiches.csv` → `MG_Fiches`), plus
+les quelques services Google que `Stats.gs` appelle au passage. Les colonnes y
+sont remises dans l'ordre de `MG_ENTETES` **par leur nom** — `mg_fiches.csv`
+porte en deuxième position une colonne `statut` que la feuille n'a pas, et
+`mgTopReleveurs_` lit « Releveur » par sa *position* : sans ce réalignement, le
+classement des releveurs compterait des contributeurs. Un selftest verrouille
+ce point.
+
+Mesuré sur les vrais fichiers : **19 541 matricules distincts**, 23 892 lignes
+d'index, 27 125 fiches, MG 1 à 126 033, 4 939 en série ambiguë.
+
+Trois libellés de la vue sont adaptés au contexte local, parce qu'ils nomment
+des choses qui n'existent pas hors de Sheets :
+
+| Dans le classeur | En local | Pourquoi |
+|---|---|---|
+| « Ouvrir le classeur » | « Ouvrir le dossier des données » | il n'y a pas de classeur |
+| « Lance *Cherche MG › Lancer le balayage complet* » | « Lance `npm run index` » | il n'y a pas de menu |
+| Identités sans numéro : « relevées, matricule inconnu » | « non collectées par le moissonneur » | voir ci-dessous |
+
+> **La phase 1 du moissonneur n'écrit pas les identités sans numéro.** Le
+> balayage Apps Script les enregistre dans `MG_Sans_numero` — environ 27 % des
+> lignes de `patro.php` — alors que `harvest.cjs --index` ne garde que les
+> lignes portant un numéro. La tuile afficherait donc un `0` qui voudrait dire
+> « aucune » quand il veut dire « pas collectées » : c'est le libellé qui est
+> corrigé, pas le chiffre. Dépose un `mg_sans_numero.csv` (ou pointe `MG_SANS`
+> dessus) et la tuile reprend son sens d'origine.
+
+Le selftest vérifie que ces trois phrases existent toujours dans la vue : si le
+module les reformule, la substitution ne portera plus et le test le dira, plutôt
+que de laisser passer un libellé trompeur.
+
+#### Quelle source donne les chiffres justes ?
+
+`chiffres.cjs` prend le premier fichier présent : `mg_matricules.csv`, sinon
+`engages.csv`, sinon `mg_fiches.csv`. Cet ordre n'est pas arbitraire — le même
+calcul, lancé sur les trois fichiers réels le 21/08/2026, ne donne pas
+tout à fait les mêmes nombres :
+
+| Source | Lignes | Matricules distincts | Engagés distincts | Identités vides |
+|---|---|---|---|---|
+| **`mg_matricules.csv`** | 23 892 | **19 541** | **23 892** | 0 |
+| `mg_fiches.csv` | 27 125 | 19 541 | 23 928 | **33** |
+| `engages.csv` | 27 096 | **19 545** | 23 899 | 0 |
+
+Aucun matricule hors de la plage 1–130 000 dans les trois, et **aucun couple
+(matricule, identité) de l'index ne manque aux deux autres** : l'index est un
+sous-ensemble strict. Les écarts viennent donc de ce que les autres ajoutent.
+
+**`mg_matricules.csv` est la bonne source par défaut**, pour trois raisons :
+
+- c'est exactement ce que contient la feuille `MG_Matricules` du classeur, donc
+  l'écran local et celui de Sheets annoncent les mêmes nombres ;
+- il est daté et reproductible — `mg_etat.json` dit quand, en combien de temps,
+  et une commande le refait ;
+- il ne porte aucune identité vide, donc aucun engagé fantôme.
+
+**N'utilise pas `mg_fiches.csv` comme index.** Il ajoute 36 couples dont **33
+sont des lignes de fiche sans identité**, sur des matricules qui portent par
+ailleurs une identité renseignée — le site y écrit « Contacter le Webmaster de
+ce site » à la place du nom. Le calcul traite « vide » comme une identité
+distincte : ces 33 lignes deviennent 33 engagés qui n'existent pas. Il ne
+gagne rien en échange : la phase 2 énumère les matricules de l'index, elle ne
+peut donc pas en connaître un de plus (19 541 des deux côtés). Il reste un
+dernier recours quand rien d'autre n'est là.
+
+**`engages.csv` connaît 4 matricules que l'index ne peut pas atteindre** —
+20925, 57847, 64321, 105054. Ce n'est pas un défaut du moissonneur : ces
+quatre-là n'ont, dans la base, qu'un relevé dont l'identité vaut `#`, la marque
+du site pour un nom illisible. Or le balayage interroge `patro.php` avec les
+26 lettres : **une identité qui ne contient aucune lettre a–z est hors de
+portée**, par construction. `#` n'apparaît d'ailleurs jamais dans
+`mg_matricules.csv` (0 occurrence), contre 7 dans `engages.csv`. L'écart est
+donc réel, connu, et vaut **4 matricules sur 19 545, soit 0,02 %**.
+
+À l'inverse, `engages.csv` n'est produit par aucune commande : il se dépose à la
+main, sans date ni traçabilité. Pointe `MG_OUT` dessus si tu veux la couverture
+maximale, en sachant que tu échanges la reproductibilité contre 4 matricules.
+
+```bash
+MG_OUT=../engages.csv npm run chiffres     # couverture maximale
+npm run chiffres                           # index : reproductible (défaut)
+```
+
+`http://localhost:8095/api` renvoie l'objet complet en JSON — le même que
+`mgStatistiques()`.
 
 ---
 
@@ -327,6 +470,10 @@ node test/test_balayage.cjs    # 47 assertions : dédup, idempotence, reprise,
                                #                 suspension, et statistiques
 node test/test_engages.cjs     # 49 assertions : import, recherche, filtres,
                                #                 pagination, export, script autonome
+node moissonneur/recherche.cjs --selftest
+                               # 39 assertions : la recherche locale, hors ligne
+node moissonneur/chiffres.cjs --selftest
+                               # 37 assertions : le tableau de bord local
 ```
 
 `test_balayage.cjs` remplace Apps Script par de faux services (Sheets,

@@ -36,6 +36,10 @@ const CFG = {
   IDLR_DB:  env('IDLR_DB',  path.join(MOISSONNEUR, 'actes.db')),
   IDLR_CSV: env('IDLR_OUT', path.join(MOISSONNEUR, 'actes.csv')),
   MOISSONNEUR_HARVEST: path.join(MOISSONNEUR, 'harvest.cjs'),
+  /** Relance harvest.cjs quand il meurt : indispensable sans surveillance. */
+  MOISSONNEUR_SUPERVISEUR: path.join(MOISSONNEUR, 'superviseur.cjs'),
+  /** Suivi Discord d'une recolte en cours. Lit seulement, n'ecrit rien. */
+  MOISSONNEUR_NOTIFY: path.join(MOISSONNEUR, 'notify.cjs'),
 
   /* ----------------------------------------------------------- sorties ----- */
   DOSSIER: env('CROIS_OUT', ICI),
@@ -44,7 +48,8 @@ const CFG = {
     ABSENTS_IDLR: 'mg_absents_didlr.csv',   // dans MG, pas dans IDLR
     COMMUNS:    'communs.csv',              // des deux cotes
     RESUME:     'resume.json',              // compteurs du dernier croisement
-    HISTORIQUE: 'historique.json'           // une entree par execution
+    HISTORIQUE: 'historique.json',          // une entree par execution
+    MAJ:        'maj_etat.json'             // etape en cours de maj.cjs
   },
 
   /* ------------------------------------------------------------- metier ---- */

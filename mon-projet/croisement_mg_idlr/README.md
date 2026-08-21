@@ -219,28 +219,59 @@ npm run recherche        # puis http://localhost:8093
 | 🟡 jaune | présent seulement dans les Archives (`actes.csv`) | 13 309 |
 | 🟢 vert | présent seulement dans MG (`engages.csv`) | 10 485 |
 | 🔵 bleu | présent dans les **deux** | 9 060 |
-| 🩷 rose | **Filae** : saisi à la main, absent des deux bases (`filae.csv`) | selon tes saisies |
+| 🩷 rose | **mg oci** : saisi à la main, absent des deux bases (`mgoci.csv`) | selon tes saisies |
 
 **La couleur n'est jamais seule.** Chaque ligne porte aussi le mot « Archives »,
-« MG », « Les deux » ou « Filae ». Ce n'est pas de la redondance décorative : jaune et vert
+« MG », « Les deux » ou « mg oci ». Ce n'est pas de la redondance décorative : jaune et vert
 sont à ΔE 6,9 en protanopie, donc difficilement séparables pour environ 8 % des
 hommes. L'étiquette est ce qui rend le code couleur lisible pour eux. Les fonds
 de ligne sont des teintes très pâles — le texte y garde un contraste de 15:1 à
 18:1 dans les deux thèmes, là où un aplat saturé le rendrait illisible.
 
-### Saisir un matricule Filae
+### Saisir un matricule mg oci
 
-Le bouton **« + Matricule Filae »** du formulaire ouvre la saisie d'un numéro
-qu'aucune des deux bases ne connaît. Champs : nom, prénom, ville, date de
-naissance, date de décès, conjoint, père, mère, et deux cases divers. Seuls le
-numéro et le nom sont obligatoires.
+Le bouton **« + Matricule mg oci »** du formulaire ouvre la saisie d'un numéro
+qu'aucune des deux bases ne connaît. Seuls le numéro et le nom sont
+obligatoires. Les quatorze champs sont rangés en cinq blocs titrés, dans cet
+ordre — c'est aussi l'ordre des colonnes du CSV :
 
-**Les dates sont du texte libre**, pas un sélecteur. En généalogie on relève
-« 1887 », « vers 1890 », « 12 germinal an XI » : un `input type=date` refuserait
-ces trois-là, qui sont pourtant les plus fréquents.
+| Bloc | Champs |
+|---|---|
+| **La personne** | numéro de matricule\*, nom\*, prénom, âge |
+| **L'acte** | type d'acte, ville |
+| **Naissance et décès** | date de naissance, lieu de naissance, date de décès |
+| **Famille** | conjoint, père, mère |
+| **Notes** | remarque, divers 2 |
+
+Les blocs ne sont pas une décoration : quatorze champs à la file obligent à
+lire chaque étiquette pour retrouver le père. Ce sont de vrais `fieldset`, donc
+un lecteur d'écran annonce « Famille — Père » et pas « Père » seul.
+
+**Le type d'acte est un menu déroulant** — naissance, décès, mariage,
+reconnaissance, légitimation. Il s'ouvre sur *« non précisé »* : un menu qui
+s'ouvrirait sur « Acte de naissance » enregistrerait une naissance à chaque
+saisie où l'on n'y touche pas. Le CSV stocke le code (`N`, `D`, `M`, `R`, `L`),
+celui du moissonneur des Archives : la colonne `type_acte` de `mgoci.csv` se
+lit donc comme celle d'`actes.csv`. `R` et `L` sont propres à mg oci — le site
+range reconnaissances et légitimations sous les naissances, et c'est justement
+ce que la saisie sert à distinguer. Le serveur refuse toute autre valeur : le
+menu n'engage que le navigateur, un POST peut arriver sans lui.
+
+**Les dates et l'âge sont du texte libre**, pas des sélecteurs. En généalogie on
+relève « 1887 », « vers 1890 », « 12 germinal an XI », « environ 40 », « 3 mois » :
+un `input type=date` ou un champ numérique refuserait la plupart de ces
+relevés, qui sont pourtant les plus fréquents.
+
+Dans les résultats, une fiche mg oci se replie dans les colonnes existantes
+plutôt que d'en ajouter cinq vides sur 99 % des lignes : la **Commune** prend la
+ville, à défaut le lieu de naissance ; le type d'acte va dans la colonne
+**Type**, commune à toutes les provenances ; les **Notes** reçoivent le lieu
+de naissance s'il n'est pas déjà en Commune, l'âge préfixé, puis la remarque
+et divers 2. Tout cela entre dans la recherche en texte libre — chercher
+« reconnaissance » ou « Saint-Benoît » ramène la fiche.
 
 **Un matricule déjà présent dans Archives ou dans MG est refusé**, avec un
-message nommant la base. Filae comble les trous de la série, il ne double pas
+message nommant la base. mg oci comble les trous de la série, il ne double pas
 ce qui existe — sinon la couverture compterait deux fois le même numéro et la
 barre des 130 000 mentirait.
 
@@ -248,7 +279,7 @@ Après enregistrement la page revient filtrée sur le nouveau numéro : la ligne
 rose est là, et les deux graphiques l'ont intégrée. Le rechargement est
 nécessaire, la barre et la frise étant calculées par le serveur.
 
-Tout atterrit dans **`filae.csv`**, à côté du code — un CSV lisible et
+Tout atterrit dans **`mgoci.csv`**, à côté du code — un CSV lisible et
 modifiable à la main, comme les deux autres sources. Aucune base à installer ;
 une sauvegarde se fait par copie. C'est le **seul** fichier que cette
 application écrit : `actes.csv` et `engages.csv` restent en lecture seule.
@@ -258,7 +289,7 @@ affiche sa vraie provenance (Archives ou MG) **plus une pastille rose** : la
 saisie n'est pas perdue, et elle n'est pas comptée deux fois.
 
 ```bash
-FILAE_CSV=/autre/chemin/filae.csv npm run recherche   # déplacer le fichier
+MGOCI_CSV=/autre/chemin/mgoci.csv npm run recherche   # déplacer le fichier
 ```
 
 ### Un matricule présent des deux côtés
@@ -269,6 +300,63 @@ est faite pour ça (`ile_archive_de_la_reunion/moissonneur`, port 8091).
 
 La colonne **Actes** indique combien d'actes les Archives portent pour ce
 matricule, et **Identité (MG)** liste les engagés que MG y rattache.
+
+La colonne **Type**, entre Date et Actes, donne **tous** les types d'acte que
+le matricule porte, en toutes lettres et dédoublonnés : `Naissance · Mariage ·
+Décès`. Trois précisions qui comptent :
+
+- **Tous les actes, pas les trois exemples gardés en mémoire.** L'index ne
+  retient que trois actes par matricule pour borner la mémoire, mais les types
+  sont collectés à part — ce sont sept codes possibles, l'ensemble ne peut pas
+  grossir. Un matricule de 115 actes ne tairait sinon ni son mariage ni son
+  décès. Sur les données réelles du 21/08/2026, **22 369 lignes sur 32 854**
+  portent un type, et les combinaisons les plus fréquentes sont `Décès` (16 395),
+  `Naissance` (2 966) et `Naissance · Décès` (1 607).
+- **L'ordre est celui d'une vie**, pas celui du fichier : naissance,
+  reconnaissance, légitimation, mariage, promesse, divorce, décès. Deux
+  matricules portant les mêmes actes se lisent donc pareil, quel que soit
+  l'ordre où le moissonnage les a rencontrés.
+- **Une case vide veut dire « non relevé », pas « aucun acte »** — d'où le
+  tiret gris. MG ne donne aucun type d'acte : les 10 485 lignes vertes sont
+  vides pour cette raison, et c'est exact.
+
+Pas de pastille colorée sur ce type, contrairement à la recherche des Archives
+(port 8091) : ici la couleur est déjà prise par la provenance, et un point vert
+« Naissance » à côté d'une ligne verte « MG » ferait lire deux codes couleur
+l'un pour l'autre.
+
+Le type entre dans la recherche en texte libre sous la forme affichée —
+chercher « mariage » ramène les lignes qui en portent un.
+
+La colonne **Famille** réunit le conjoint, le père et la mère relevés dans
+l'acte — ou saisis, sur une ligne mg oci. Une seule colonne plutôt que trois :
+l'entourage n'est relevé que sur les mariages, soit **7,5 % des actes**, et
+trois colonnes vides sur les 92 % restants gêneraient la lecture. Ces noms
+entrent dans la recherche en texte libre : chercher « Sinnama » ramène
+l'acte où elle est épouse, pas seulement ceux où elle est la personne
+principale.
+
+Le contenu dépend du **type d'acte**, parce que le site ne relève pas les
+mêmes choses :
+
+| Type | Ce qui s'affiche |
+|---|---|
+| Mariage, promesse, divorce | `conj. NOM Prénom`, `père …`, `mère …` |
+| **Naissance** | `père <prénom>`, `mère NOM Prénom`, † si le parent est mort, `parr.`, `marr.` |
+| Décès | `père †`, `mère †` |
+| mg oci | ce que tu as saisi |
+
+> **Une naissance donne le prénom du père et le nom complet de la mère** —
+> 82 %, 98 % et 96 % des actes sondés sur une page réelle le 21/08/2026.
+> Le site ne donne **pas** le NOM du père : c’est le patronyme de l’enfant,
+> déjà en colonne Nom. La ligne affiche donc `père Guillaume` et non
+> `père HOAREAU Guillaume` — recopier le nom de l’enfant serait une
+> déduction, fausse sur les 11 % d’actes qui sont des reconnaissances.
+>
+> **Ces colonnes restent vides tant qu’une récolte ne les a pas remplies** ;
+> seul le conjoint est là depuis toujours. Voir
+> `ile_archive_de_la_reunion/moissonneur/README.md`, section « Rattraper les
+> noms de parents ».
 Filtres : texte libre (identité, nom, notes, sources, origine — insensible aux
 accents), provenance, plage de matricules, commune, origine.
 
@@ -294,13 +382,13 @@ pas une barre à l'échelle du maximum observé : on lit donc directement la par
 connue de chaque tranche, et les tranches se comparent entre elles.
 
 Dans les deux, les couleurs s'empilent dans le même ordre : Archives seul, les
-deux, MG seul, puis Filae. Survoler une colonne donne ses chiffres exacts ;
+deux, MG seul, puis mg oci. Survoler une colonne donne ses chiffres exacts ;
 **cliquer filtre la recherche sur cette tranche**, recliquer désélectionne, et
 la colonne active reste encadrée.
 
 > **Un plancher de 2 px.** Un matricule vaut 0,01 % d'une tranche et 0,0008 %
 > de la série : à l'échelle, son segment ferait 0,01 px — invisible. Une saisie
-> Filae qui n'apparaît pas serait prise pour une saisie perdue, donc tout
+> mg oci qui n'apparaît pas serait prise pour une saisie perdue, donc tout
 > segment non vide reçoit 2 px au minimum. La proportion est légèrement faussée
 > vers le haut pour les très petits effectifs ; les nombres exacts restent dans
 > la légende et dans l'infobulle de chaque colonne.
@@ -314,7 +402,7 @@ de petits numéros.
 > 1 787 numéros hors plage apparaissent comme une entrée grise à part dans la
 > légende — ils restent cherchables mais n'entrent dans aucune tranche. Les
 > totaux tombent juste : 11 522 + 10 485 + 9 060 + 1 787 = 32 854, plus tes
-> saisies Filae.
+> saisies mg oci.
 >
 > La provenance est décidée **une seule fois**, par `provenanceDe()` dans
 > `recherche.cjs` : lignes, légende, barre et frise lisent toutes cette
@@ -380,20 +468,77 @@ parfaits d'`actes.csv` sont écartés à la lecture, comme dans `importer.cjs`.
 
 ## 7. Mise à jour semestrielle
 
-`maj.cjs` enchaîne les trois étapes :
+`maj.cjs` est fait pour tourner **seul**, deux fois par an, sans personne devant
+l'écran. Il enchaîne quatre étapes :
 
-1. **IDLR** — `harvest.cjs --refresh` : relit le total de chaque bucket et ne
-   re-récolte que ceux qui ont grossi. Plusieurs heures.
-2. **MG** — `cherche_mg/moissonneur/harvest.cjs --index --force` : 26 requêtes,
-   ~90 s. Seulement l'index : la phase 2 (fiches, ~33 h) est un chantier à part,
-   qu'on ne relance pas automatiquement tous les six mois.
-3. **Croisement** + rapport, avec notification Discord si `IDLR_DISCORD_WEBHOOK`
-   est défini (même webhook que `notify.cjs` du moissonneur).
+| # | Étape | Commande | Durée |
+|---|---|---|---|
+| 1 | **IDLR** | `superviseur.cjs --refresh` | 15 à 28 h |
+| 2 | **MG — index** | `harvest.cjs --index --force` | ~90 s |
+| 3 | **Croisement + rapport** | `croiser.cjs` | quelques secondes |
+| 4 | **MG — fiches** | `harvest.cjs --fiches` | ~33 h |
 
 ```bash
-node maj.cjs                # tout
-node maj.cjs --sans-idlr    # garde la base d'actes existante
-node maj.cjs --dry          # montre ce qui serait fait
+node maj.cjs                    # les quatre étapes
+node maj.cjs --etat             # où en est-on ? (ne lance rien)
+node maj.cjs --dry              # montre ce qui serait fait
+node maj.cjs --sans-idlr        # garde la base d'actes existante
+node maj.cjs --sans-fiches      # saute la traîne de 33 h
+node maj.cjs --sans-superviseur # harvest.cjs en direct
+```
+
+Trois décisions expliquent cet ordre, et méritent d'être connues avant d'y
+toucher.
+
+**L'étape IDLR passe par `superviseur.cjs`, pas par `harvest.cjs`.** Une récolte
+complète, c'est ~35 000 requêtes sur plus de 28 h, et `harvest.cjs` abandonne
+après **5 échecs d'affilée** — soit moins d'une minute de site indisponible. Sur
+une nuit entière, ça arrive. Le superviseur relance et le checkpoint reprend au
+bucket suivant ; l'attente entre deux relances double à chaque fois (1, 2, 4…
+jusqu'à 30 min) et il abandonne pour de bon après 8 échecs **sans le moindre
+progrès** — marteler le serveur d'une association en panne serait exactement ce
+qu'il ne faut pas faire.
+
+**`--refresh` n'est pas une demi-mesure.** Il relit le total annoncé de *chaque*
+bucket (commune × type × initiale) et ne re-télécharge que ceux qui ont grossi,
+en dédoublonnant par `numero`. C'est ce qui rend une mise à jour complète
+tenable deux fois par an : une récolte intégrale referait 28 h de trafic sur le
+serveur des bénévoles pour retrouver ce qu'on a déjà.
+
+**Les fiches MG passent APRÈS le rapport.** Le croisement lit
+`mg_matricules.csv`, jamais `mg_fiches.csv` : mettre les 33 h de phase 2 avant
+retarderait le bilan de deux jours sans rien y ajouter. On reçoit donc le
+rapport en fin de nuit, et les fiches arrivent quand elles arrivent — leur
+reprise se fait sur le fichier de sortie, une coupure ne coûte rien.
+
+### Savoir qu'un moissonnage est en cours
+
+Quatre voies, de la plus passive à la plus directe :
+
+| Voie | Ce qu'elle donne | Demande |
+|---|---|---|
+| **Discord** | démarrage, résumé toutes les 30 min, rapport, fin, échec | un webhook |
+| `node maj.cjs --etat` | étape en cours, depuis quand, PID vivant ou non | un shell |
+| Tableau de bord **:8080** | avancement de la récolte IDLR, rythme, fin estimée | un navigateur |
+| `maj.log` · `systemctl status croisement` | le journal complet | un accès VPS |
+
+**Le webhook est la pièce qui change tout.** Avec `IDLR_DISCORD_WEBHOOK` défini,
+`maj.cjs` prévient **au démarrage** — plan des étapes et durées annoncées —,
+lance `notify.cjs` en fond pendant toute la récolte IDLR (résumé périodique, et
+alerte immédiate si l'état change), poste le rapport de croisement dès qu'il est
+prêt, signale la fin des fiches, et signale tout échec **en nommant l'étape**.
+Sans webhook, tout fonctionne à l'identique mais en silence.
+
+`maj_etat.json` est écrit à chaque changement d'étape et **conservé après la
+fin** : la dernière exécution reste consultable. `--etat` sait distinguer une
+mise à jour qui tourne d'une qui a été coupée — il vérifie que le PID répond
+encore :
+
+```
+EN COURS — demarree le 2026-07-01T03:12:44.019Z (486 min)
+  etape : IDLR, depuis 486 min
+  pid   : 21774
+  etapes : IDLR ...
 ```
 
 ### Planification
@@ -407,19 +552,20 @@ systemctl list-timers croisement.timer      # prochaine échéance
 
 Le timer part le **1ᵉʳ janvier et le 1ᵉʳ juillet à 03h00**. `Persistent=true` :
 si le VPS était éteint à l'heure dite, la mise à jour part au démarrage suivant
-au lieu d'être perdue jusqu'au semestre d'après. Éditer les chemins dans
-`croisement.service` si le dossier n'est pas dans `/home/ubuntu/`.
+au lieu d'être perdue jusqu'au semestre d'après. `RandomizedDelaySec=30m` évite
+que tous les timers du VPS partent à la même seconde.
 
-Sans systemd, l'équivalent cron :
+`TimeoutStartSec=96h` : les deux longues étapes mises bout à bout font ~60 h
+dans le pire cas. Une minuterie trop courte tuerait une exécution parfaitement
+normale, au milieu, sans que rien ne le dise.
 
-```cron
-0 3 1 1,7 * cd /home/ubuntu/croisement_mg_idlr && /usr/bin/node maj.cjs >> maj.log 2>&1
-```
+Éditer les chemins dans `croisement.service` si le dossier n'est pas dans
+`/home/ubuntu/`, et y décommenter la ligne `IDLR_DISCORD_WEBHOOK`.
 
-Le semestre est un compromis assumé : les deux sites sont alimentés par des
-bénévoles, au fil de l'eau. Plus fréquent ne rapporterait presque rien et
-pèserait sur deux serveurs associatifs ; moins fréquent laisserait dormir des
-apports pendant un an.
+> **Le service déclare `OCI_ENV=prod`.** Sans cette ligne, la mise à jour
+> tournerait en dev et les deux moissonneurs refuseraient de sortir — l'unité
+> échouerait bruyamment plutôt que de récolter en silence depuis une machine de
+> développement. N'installe le timer **que** sur le VPS.
 
 ---
 
@@ -429,9 +575,10 @@ apports pendant un an.
 npm test                        # les trois suites ci-dessous
 
 node test/test_croisement.cjs   # 37 assertions, bout en bout, hors ligne
-node test/test_filae.cjs        # 55 assertions sur la provenance Filae
-node filae.cjs                  # 27 assertions sur le magasin de saisie
+node test/test_mgoci.cjs        # 101 assertions sur la provenance mg oci
+node mgoci.cjs                  # 40 assertions sur le magasin de saisie
 node croiser.cjs --selftest     # concordance des noms + état des sources
+node maj.cjs --selftest         # 19 assertions sur la mise à jour automatique
 ```
 
 `test_croisement.cjs` fabrique un index MG et un `actes.csv` de synthèse dans un
@@ -440,16 +587,24 @@ contenu des trois CSV. Les cas piégeux y sont volontaires : série ambiguë,
 matricule écrit `N°2-537`, numéro hors plage, et un champ `obs` contenant
 virgule, guillemets et saut de ligne — celui qui casse un découpage naïf.
 
-`test_filae.cjs` vérifie ce qui doit rester cohérent quand on ajoute une
+`test_mgoci.cjs` vérifie ce qui doit rester cohérent quand on ajoute une
 provenance : la ligne, la légende, la barre et la frise donnent-elles les mêmes
 nombres ? Le plancher de 2 px est-il bien posé ? Un matricule déjà connu est-il
 refusé ? Et surtout le cas qui n'arrivera que dans six mois — un moissonnage
 qui rattrape une saisie : la ligne doit changer de provenance sans perdre la
 trace de la saisie **ni** compter le numéro deux fois.
 
-`filae.cjs --selftest` couvre l'écriture CSV, où se cachent les pièges
+`maj.cjs --selftest` vérifie ce qui ne se voit qu'une fois tous les six mois, à
+3 h du matin : l'ordre des quatre étapes, le fait que le croisement passe avant
+les fiches, la présence du superviseur et de `notify.cjs` là où on les attend,
+le cycle de vie de `maj_etat.json` (écrit, relu, illisible, terminé), la
+détection d'un PID mort, et la taille du rapport Discord. Aucune requête.
+
+`mgoci.cjs --selftest` couvre l'écriture CSV, où se cachent les pièges
 classiques : un nom contenant une virgule, des guillemets (`dit "le grand"`) ou
-un saut de ligne doit revenir intact après un aller-retour sur disque.
+un saut de ligne doit revenir intact après un aller-retour sur disque. Il vérifie
+aussi les valeurs à choix : un type d'acte hors liste est refusé, et le libellé
+à la place du code (`Naissance` au lieu de `N`) l'est aussi.
 
 ---
 

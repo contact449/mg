@@ -38,6 +38,90 @@ const TOTAL = COMMUNES.length * PER_COMMUNE;    // 3250 cases au total
 
 let base = null;   // repère mémoire pour calculer le rythme (rempli au 1er /stats)
 
+/**
+ * Combien d'actes la RÉCOLTE PRÉCÉDENTE avait rapportés.
+ *
+ * L'avancement en cases dit où on en est dans le travail ; il ne dit pas si
+ * la moisson est normale. Comparer au relevé précédent le dit : à mi-parcours
+ * on doit être à peu près à la moitié. Un écart franc signale un problème
+ * (site qui a changé, filtre trop strict) avant qu'on ait perdu 28 h.
+ *
+ * Le fichier de référence est actes.csv, celui d'avant. On compte ses lignes
+ * une fois, puis on retient le résultat tant que ni sa taille ni sa date ne
+ * changent : le relire à chaque rafraîchissement coûterait 8 Mo toutes les
+ * cinq secondes pour un nombre qui ne bouge pas.
+ */
+const REF = process.env.IDLR_REF || path.join(__dirname, 'actes.csv');
+let memoRef = null;
+
+function actesReference() {
+  let s;
+  try { s = fs.statSync(REF); } catch { return null; }
+  const sig = s.size + ':' + s.mtimeMs;
+  if (memoRef && memoRef.sig === sig) return memoRef.n;
+
+  // Compte les sauts de ligne HORS guillemets : le champ obs en contient.
+  let n = 0, dansGuillemets = false, reste = '';
+  const fd = fs.openSync(REF, 'r');
+  const buf = Buffer.allocUnsafe(1 << 20);
+  try {
+    for (;;) {
+      const lu = fs.readSync(fd, buf, 0, buf.length, null);
+      if (!lu) break;
+      const bloc = reste + buf.toString('utf8', 0, lu);
+      reste = '';
+      for (let i = 0; i < bloc.length; i++) {
+        const c = bloc[i];
+        if (c === '"') dansGuillemets = !dansGuillemets;
+        else if (c === '\n' && !dansGuillemets) n++;
+      }
+    }
+  } finally { fs.closeSync(fd); }
+
+  n = Math.max(0, n - 1);                       // moins l'en-tête
+  memoRef = { sig, n };
+  return n;
+}
+
+/**
+ * Le coût de chaque case, mesuré lors de la récolte précédente.
+ *
+ * Compter les cases faites traite un bucket de 400 actes comme un de 4 000.
+ * Or c'est le nombre de PAGES qui coûte du temps : une case, c'est une
+ * requête par tranche de 50 actes. Sur les premières communes — les plus
+ * petites — l'avancement en cases est flatteur et l'heure de fin annoncée
+ * bien trop optimiste : 15 h là où le calcul sur les vraies tailles donne
+ * 28 h. Une estimation fausse dans ce sens est pire que pas d'estimation.
+ *
+ * Le relevé précédent donne la taille de chacune des 3 250 cases. On s'en
+ * sert comme d'un devis : ce qui reste à faire est chiffré, pas extrapolé.
+ */
+const REF_CK = process.env.IDLR_REF_CK || path.join(__dirname, 'checkpoint.json');
+const PAGE_SIZE = 50;
+let memoCout = null;
+
+function coutParCase() {
+  let s;
+  try { s = fs.statSync(REF_CK); } catch { return null; }
+  const sig = s.size + ':' + s.mtimeMs;
+  if (memoCout && memoCout.sig === sig) return memoCout.v;
+
+  let totaux;
+  try { totaux = JSON.parse(fs.readFileSync(REF_CK, 'utf8')).totals; } catch { return null; }
+  if (!totaux || !Object.keys(totaux).length) return null;
+
+  const cout = {};
+  let somme = 0;
+  for (const [cle, n] of Object.entries(totaux)) {
+    const req = Math.max(1, Math.ceil((n || 0) / PAGE_SIZE));
+    cout[cle] = req;
+    somme += req;
+  }
+  const v = { cout, somme, cases: Object.keys(totaux).length };
+  memoCout = { sig, v };
+  return v;
+}
+
 function stats() {
   let ck = { done: [], actes: 0 }, mtime = 0, csvSize = 0;
   try { ck = JSON.parse(fs.readFileSync(CK, 'utf8')); } catch {}
@@ -54,21 +138,51 @@ function stats() {
   const finished = done.length >= TOTAL;
   const alive = !finished && ageSec !== null && ageSec < 120;
 
-  if (!base && done.length) base = { t: now, done: done.length, actes: ck.actes || 0 };
+  // Avancement pondéré par le coût réel de chaque case, quand on le connaît.
+  const devis = coutParCase();
+  let reqFaites = 0;
+  if (devis) for (const k of done) reqFaites += devis.cout[k] || 1;
+  const reqTotal = devis ? devis.somme : 0;
+
+  if (!base && done.length) {
+    base = { t: now, done: done.length, actes: ck.actes || 0, req: reqFaites };
+  }
   let keyRate = 0, etaMin = null;   // cases/min et ETA
   if (base && now > base.t) {
-    keyRate = (done.length - base.done) / ((now - base.t) / 60000);
-    if (keyRate > 0 && !finished) etaMin = Math.round((TOTAL - done.length) / keyRate);
+    const min = (now - base.t) / 60000;
+    keyRate = (done.length - base.done) / min;
+
+    if (devis && reqTotal > reqFaites) {
+      // Rythme en REQUÊTES : le seul qui reste stable d'une commune à l'autre.
+      const reqRate = (reqFaites - base.req) / min;
+      if (reqRate > 0 && !finished) etaMin = Math.round((reqTotal - reqFaites) / reqRate);
+    } else if (keyRate > 0 && !finished) {
+      etaMin = Math.round((TOTAL - done.length) / keyRate);
+    }
   }
 
   const last = done[done.length - 1] || '';
   const [lastCommune, lastType, lastLetter] = last.split('|');
 
+  const actes = ck.actes || 0;
+  const ref = actesReference();
+
   return {
     finished, alive, ageSec,
-    actes: ck.actes || 0,
+    actes,
+    // Deux lectures différentes, et il faut les deux : `pct` dit où on en est
+    // dans le TRAVAIL, `pctActes` si la MOISSON est normale. Une récolte peut
+    // être à 50 % du travail et n'avoir rapporté que 10 % des actes attendus.
+    ref,
+    pctActes: ref ? Math.round((actes / ref) * 1000) / 10 : null,
     doneKeys: done.length, totalKeys: TOTAL,
-    pct: Math.round((done.length / TOTAL) * 1000) / 10,
+    // `pct` est pondéré par le coût des cases dès qu'on connaît leurs tailles.
+    // Sans devis on retombe sur le comptage brut, qui reste mieux que rien.
+    pct: reqTotal
+      ? Math.round((reqFaites / reqTotal) * 1000) / 10
+      : Math.round((done.length / TOTAL) * 1000) / 10,
+    pondere: !!reqTotal,
+    reqFaites, reqTotal,
     csvMo: Math.round((csvSize / 1048576) * 10) / 10,
     keyRate: Math.round(keyRate * 10) / 10,
     etaMin,
@@ -97,11 +211,13 @@ h1{font-size:18px;margin:0 0 16px;font-weight:600}
 .cm .mini{height:6px;background:#262a33;border-radius:4px;overflow:hidden}
 .cm .mini>i{display:block;height:100%;background:#22c55e;width:0}
 .muted{color:#8a92a3;font-size:13px}
+/* Sous-titre d une carte : le contexte sans voler la vedette au chiffre. */
+.card .sub{font-size:11.5px;color:#8a92a3;margin-top:3px;line-height:1.35}
 </style></head><body><div class=wrap>
 <h1><span class=dot id=dot></span><span id=status>…</span></h1>
 <div class=cards>
-  <div class=card><div class=k>Actes récoltés</div><div class=v id=actes>—</div></div>
-  <div class=card><div class=k>Avancement</div><div class=v id=pct>—</div></div>
+  <div class=card><div class=k>Actes récoltés</div><div class=v id=actes>—</div><div class=sub id=actesRef></div></div>
+  <div class=card><div class=k>Avancement</div><div class=v id=pct>—</div><div class=sub id=pctSub></div></div>
   <div class=card><div class=k>En cours</div><div class=v id=cur style=font-size:18px>—</div></div>
   <div class=card><div class=k>Rythme</div><div class=v id=rate style=font-size:18px>—</div></div>
   <div class=card><div class=k>Fin estimée</div><div class=v id=eta style=font-size:18px>—</div></div>
@@ -120,9 +236,22 @@ async function tick(){
   else if(s.alive){dot.style.background='#22c55e';st.textContent='En cours';}
   else{dot.style.background='#ef4444';st.textContent='Inactif'+(s.ageSec!=null?' (rien depuis '+s.ageSec+'s)':' (pas démarré)');}
   document.getElementById('actes').textContent=s.actes.toLocaleString('fr-FR');
-  document.getElementById('pct').textContent=s.pct+' %';
+  /* Rapport a la recolte precedente : dit si la moisson est normale, la ou
+     l avancement en cases ne dit que le chemin parcouru. */
+  document.getElementById('actesRef').textContent = s.ref
+    ? s.pctActes.toString().replace('.',',')+' % des '+s.ref.toLocaleString('fr-FR')+' du relevé précédent'
+    : '';
+    /* Virgule decimale : on est en francais, et le contraste avec les autres
+     nombres de la page sautait aux yeux. */
+  const vg=x=>String(x).replace('.',',');
+  document.getElementById('pct').textContent=vg(s.pct)+' %';
+  /* Dire sur quoi porte le pourcentage : ponderé par le coût reel des cases
+     quand on connait leurs tailles, sinon simple comptage. */
+  document.getElementById('pctSub').textContent = s.pondere
+    ? s.reqFaites.toLocaleString('fr-FR')+' / '+s.reqTotal.toLocaleString('fr-FR')+' requêtes'
+    : s.doneKeys+' / '+s.totalKeys+' cases';
   document.getElementById('cur').textContent=s.last.commune+(s.last.type?' · '+s.last.type+' · '+(s.last.letter||'').toUpperCase():'');
-  document.getElementById('rate').textContent=s.keyRate>0?s.keyRate+' cases/min':'—';
+  document.getElementById('rate').textContent=s.keyRate>0?vg(s.keyRate)+' cases/min':'—';
   document.getElementById('eta').textContent=fmtEta(s.etaMin);
   document.getElementById('csv').textContent=s.csvMo+' Mo';
   document.getElementById('barfill').style.width=s.pct+'%';

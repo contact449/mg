@@ -13,6 +13,8 @@
     "import": "node moissonneur/importer.cjs",
     "search": "node moissonneur/search.cjs",
     "dashboard": "node moissonneur/serve.cjs",
-    "test": "node moissonneur/harvest.cjs --selftest && node moissonneur/importer.cjs --selftest"
+    "test": "node moissonneur/harvest.cjs --selftest && node moissonneur/importer.cjs --selftest",
+    "suivi-2026": "node moissonneur/serve.cjs",
+    "recolte-2026": "node moissonneur/superviseur.cjs"
   }
 }

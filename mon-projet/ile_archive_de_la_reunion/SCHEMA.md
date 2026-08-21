@@ -60,9 +60,21 @@ dans `personnes` : `principal` seul (Naissance, Décès) ou `principal` + `conjo
 
 | Type | Colonnes personne |
 |---|---|
-| Naissance | Nom, Prénom, Sexe, [père +], [mère +], Parrain, Marraine |
+| Naissance | Nom, Prénom, Sexe, **Prénom du père**, [+], **Nom de la mère**, **Prénom de la mère**, [+], Parrain, Marraine |
 | Décès | Nom, Prénom, Sexe, Age, [père +], [mère +], Origine |
 | Mariage | ×2 (principal + conjoint) : Nom, Prénom, Age, Date°, [+ père], père, mère, [+ mère], Origine |
+
+> **Corrigé le 21/08/2026, sur une page réelle de Saint-Denis.** Ce tableau
+> annonçait auparavant, pour la Naissance, « [père +], [mère +], Parrain,
+> Marraine » — c’est-à-dire aucun nom de parent. C’était faux : le site donne
+> le **prénom du père** (82 % des actes sondés), le **nom** (98 %) et le
+> **prénom** (96 %) **de la mère**.
+>
+> Le site ne donne **pas** le NOM du père sur une naissance (0 %) : par
+> convention c’est le patronyme de l’enfant, qui figure déjà en colonne « Nom ».
+> Ne pas l’y recopier automatiquement — 11 % de ces actes sont des
+> reconnaissances, où l’enfant peut ne pas porter le nom du père, et c’est
+> précisément là que l’inférence serait fausse.
 
 ## `warnings[]` (jamais d'échec silencieux)
 

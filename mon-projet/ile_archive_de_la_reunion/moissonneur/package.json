@@ -12,6 +12,8 @@
     "import": "node importer.cjs",
     "search": "node search.cjs",
     "dashboard": "node serve.cjs",
-    "test": "node harvest.cjs --selftest && node importer.cjs --selftest"
+    "test": "node harvest.cjs --selftest && node importer.cjs --selftest",
+    "recolte-2026": "node superviseur.cjs",
+    "suivi-2026": "node serve.cjs"
   }
 }

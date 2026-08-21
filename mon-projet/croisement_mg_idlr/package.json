@@ -10,8 +10,9 @@
     "start": "node croiser.cjs",
     "mg": "node mg.cjs",
     "maj": "node maj.cjs",
+    "etat": "node maj.cjs --etat",
     "serve": "node serve.cjs",
-    "test": "node test/test_croisement.cjs && node test/test_filae.cjs && node filae.cjs",
+    "test": "node test/test_croisement.cjs && node test/test_mgoci.cjs && node mgoci.cjs && node maj.cjs --selftest",
     "recherche": "node recherche.cjs"
   }
 }

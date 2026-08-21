@@ -59,9 +59,11 @@ Pour un appel reel ponctuel depuis le dev :
 ```
 
 Ce qui **reste libre en dev**, parce que rien ne sort : tous les `--selftest`,
-`importer.cjs`, `search.cjs`, `serve.cjs`, `croiser.cjs`, et la lecture des
-fichiers déjà récoltés. On peut donc développer et tester toute la chaîne sans
-jamais toucher aux sites.
+`importer.cjs`, `croiser.cjs`, et les cinq serveurs de consultation —
+`search.cjs`, `serve.cjs`, les deux `recherche.cjs` (engagés et croisement) et
+`chiffres.cjs`.
+La lecture des fichiers déjà récoltés l'est aussi. On peut donc développer et
+tester toute la chaîne sans jamais toucher aux sites.
 
 ### Savoir où l'on est
 
@@ -138,11 +140,13 @@ N'installe le timer **que** sur le VPS.
 ```bash
 cd croisement_mg_idlr && node croiser.cjs --selftest
 cd cherche_mg/moissonneur && node harvest.cjs --selftest
+cd cherche_mg/moissonneur && node recherche.cjs --selftest
+cd cherche_mg/moissonneur && node chiffres.cjs --selftest
 cd ile_archive_de_la_reunion/moissonneur && node harvest.cjs --selftest
 ```
 
-Chacun contrôle son environnement, et deux d'entre eux vérifient en plus que
-les copies de `Env.js`, `Config.js` et `Parser.js` n'ont pas dérivé de leur
-référence. C'est ce contrôle qui a rattrapé, dès sa première exécution, une
+Chacun contrôle son environnement, et trois d'entre eux vérifient en plus que
+les copies de `Env.js`, `Config.js`, `Parser.js`, `Engages.js`, `Stats.js` et
+`Vue.html` n'ont pas dérivé de leur référence. C'est ce contrôle qui a rattrapé, dès sa première exécution, une
 copie de `Config.js` laissée en arrière après une modification du module Apps
 Script.

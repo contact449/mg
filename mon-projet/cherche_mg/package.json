@@ -11,6 +11,8 @@
     "start": "node moissonneur/harvest.cjs",
     "index": "node moissonneur/harvest.cjs --index",
     "fiches": "node moissonneur/harvest.cjs --fiches",
-    "test": "node test/test_parser.cjs && node test/test_balayage.cjs && node test/test_engages.cjs && node moissonneur/harvest.cjs --selftest"
+    "recherche": "node moissonneur/recherche.cjs",
+    "chiffres": "node moissonneur/chiffres.cjs",
+    "test": "node test/test_parser.cjs && node test/test_balayage.cjs && node test/test_engages.cjs && node moissonneur/harvest.cjs --selftest && node moissonneur/recherche.cjs --selftest && node moissonneur/chiffres.cjs --selftest"
   }
 }

@@ -205,9 +205,23 @@ async function fetchRest(gs, session, type, nom, total, acc) {
 // on ne garde que les chiffres. Pas d'espace dans la classe (éviterait d'avaler
 // le texte/l'année qui suit, ex. « N°537 °1833 »).
 const MATRICULE_RE = /[nN]\s*°\s*(\d+(?:[.\-]\d+)*)/;
+// L'entourage relevé dans l'acte. Le parser lisait déjà `pere.nom`,
+// `pere.prenom`, `mere.nom` et `mere.prenom` — c'est recordToRow() qui les
+// jetait. Ces quatre colonnes ne se remplissent que pour les actes qui les
+// portent (mariages surtout) ; ailleurs elles restent vides, comme le
+// conjoint l'est déjà pour les naissances et les décès.
+// `pere_decede` / `mere_decede` viennent des colonnes « + » du site, et
+// `parrain` / `marraine` du tableau des naissances. Sur un acte de NAISSANCE
+// le site ne donne rien d'autre sur les parents : pas de nom, seulement la
+// marque « décédé » — les noms n'existent que sur les mariages (voir
+// SCHEMA.md, « Colonnes vues par type »). Le parrain et la marraine sont donc
+// les seuls noms d'entourage qu'une naissance apporte, et en généalogie
+// réunionnaise ce sont très souvent des proches de la famille.
 const COLS = ['matricule', 'type_acte', 'commune', 'date_iso', 'nom', 'prenom',
-  'sexe', 'conjoint_nom', 'conjoint_prenom', 'age', 'origine', 'obs', 'numero',
-  'url_demande_photo'];
+  'sexe', 'conjoint_nom', 'conjoint_prenom',
+  'pere_nom', 'pere_prenom', 'mere_nom', 'mere_prenom',
+  'pere_decede', 'mere_decede', 'parrain', 'marraine',
+  'age', 'origine', 'obs', 'numero', 'url_demande_photo'];
 
 function csvField(v) {
   const s = v == null ? '' : String(v);
@@ -224,9 +238,22 @@ function matriculeNum(obs) {                       // « N°2-537 » -> « 2537 
 function recordToRow(rec) {
   const p = (rec.personnes && rec.personnes.principal) || {};
   const c = (rec.personnes && rec.personnes.conjoint) || {};
+  // Les parents sont ceux de la personne PRINCIPALE. Un acte de mariage en
+  // porte deux jeux — ceux de l'époux et ceux de l'épouse ; on garde le
+  // premier, celui qui va avec le nom affiché dans la ligne. Prendre les deux
+  // demanderait deux lignes par acte et casserait le dédoublonnage par photo.
+  const pere = p.pere || {};
+  const mere = p.mere || {};
+  // Le parser rend un booleen pour les colonnes « + ». On ecrit 1 ou rien :
+  // « false » dans un CSV se relit comme une chaine non vide, donc comme un
+  // vrai — le genre d'inversion qui ne se voit qu'a l'affichage.
+  const oui = (v) => (v === true ? '1' : '');
   return [matriculeNum(rec.obs), rec.type_acte, rec.commune, rec.date_iso, p.nom || '',
-    p.prenom || '', p.sexe || '', c.nom || '', c.prenom || '', p.age || '',
-    p.origine || '', rec.obs || '', rec.numero || '', rec.url_demande_photo || ''];
+    p.prenom || '', p.sexe || '', c.nom || '', c.prenom || '',
+    pere.nom || '', pere.prenom || '', mere.nom || '', mere.prenom || '',
+    oui(pere.decede), oui(mere.decede), p.parrain || '', p.marraine || '',
+    p.age || '', p.origine || '', rec.obs || '', rec.numero || '',
+    rec.url_demande_photo || ''];
 }
 
 /* -------------------------------------------------------------- checkpoint */
@@ -276,10 +303,112 @@ function loadSeen() {
   return seen;
 }
 
+/* ---------------------------------------------- migration de l'en-tête ---- */
+
+/**
+ * Découpe un CSV entier en lignes, en respectant les guillemets.
+ *
+ * `parseCsvLine` ne voit qu'une ligne : découper le fichier sur `\n` avant de
+ * l'appeler coupe en deux tout champ `obs` contenant un saut de ligne — et il
+ * y en a. La migration réécrit le fichier, elle ne peut pas se permettre ça.
+ */
+function lignesCsv(texte) {
+  const out = [];
+  let ligne = [], champ = '', q = false;
+  for (let i = 0; i < texte.length; i++) {
+    const c = texte[i];
+    if (q) {
+      if (c === '"') { if (texte[i + 1] === '"') { champ += '"'; i++; } else q = false; }
+      else champ += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { ligne.push(champ); champ = ''; }
+    else if (c === '\n') { ligne.push(champ); out.push(ligne); ligne = []; champ = ''; }
+    else if (c !== '\r') champ += c;
+  }
+  if (champ !== '' || ligne.length) { ligne.push(champ); out.push(ligne); }
+  return out;
+}
+
+/**
+ * Aligne un actes.csv écrit avec un jeu de colonnes plus ancien.
+ *
+ * Le moissonneur ÉCRIT EN FIN DE FICHIER : sans cette étape, ajouter une
+ * colonne produirait des lignes plus larges que l'en-tête, et le fichier
+ * deviendrait incohérent en silence — le pire des dégâts, parce qu'il ne se
+ * voit qu'au moment de relire.
+ *
+ * Les colonnes sont remises en place PAR NOM, jamais par position : une
+ * colonne ancienne inconnue de COLS serait perdue, donc on refuse plutôt que
+ * de la jeter. L'original est conservé en `.avant-migration`.
+ */
+function migrerEntete(chemin) {
+  const OUT = chemin || OUT_CSV;
+  if (!fs.existsSync(OUT) || fs.statSync(OUT).size === 0) return null;
+
+  const texte = fs.readFileSync(OUT, 'utf8');
+  const rows = lignesCsv(texte);
+  if (!rows.length) return null;
+
+  const ancienne = rows[0].map((h) => h.trim());
+  if (ancienne.join(',') === COLS.join(',')) return null;       // déjà à jour
+
+  const perdues = ancienne.filter((c) => c && COLS.indexOf(c) === -1);
+  if (perdues.length) {
+    throw new Error(
+      'actes.csv porte des colonnes que ce moissonneur ne connaît pas : ' +
+      perdues.join(', ') + '\n' +
+      'Migrer automatiquement les perdrait. Vérifie la version du moissonneur.');
+  }
+
+  const sauvegarde = OUT + '.avant-migration';
+  fs.writeFileSync(sauvegarde, texte);
+
+  const pos = COLS.map((c) => ancienne.indexOf(c));   // -1 = colonne nouvelle
+  const lignes = [];
+  for (let i = 1; i < rows.length; i++) {
+    const l = rows[i];
+    if (l.length === 1 && !l[0]) continue;                      // ligne vide finale
+    lignes.push(pos.map((j) => (j === -1 ? '' : (l[j] == null ? '' : l[j]))));
+  }
+  fs.writeFileSync(OUT, csvLine(COLS) + lignes.map(csvLine).join(''));
+
+  const ajoutees = COLS.filter((c) => ancienne.indexOf(c) === -1);
+  console.log(path.basename(OUT) + ' migré : ' + lignes.length + ' lignes, ' +
+              ajoutees.length + ' colonne(s) ajoutée(s) — ' + ajoutees.join(', '));
+  console.log('  vides tant qu\'un moissonnage ne les a pas remplies.');
+  console.log('  original conservé : ' + path.basename(sauvegarde));
+  return { entete: COLS, lignes, ajoutees };
+}
+
 /* ------------------------------------------------------------------- main - */
+
+/**
+ * Les types d'actes à récolter, éventuellement restreints.
+ *
+ *   node harvest.cjs --refresh --types=M,PM,DIV
+ *
+ * Les noms de parents ne figurent que sur les actes qui portent ces colonnes
+ * — les mariages, pour l'essentiel, soit 7,5 % du fonds. Les rattraper sans
+ * cette option imposerait de repasser sur les 39 000 actes, dont 36 000 qui
+ * n'apprendraient rien.
+ */
+function typesDemandes(argv) {
+  const arg = (argv || process.argv).find((x) => String(x).indexOf('--types=') === 0);
+  if (!arg) return TYPES;
+  const voulus = arg.slice(8).split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+  const inconnus = voulus.filter((t) => TYPES.indexOf(t) === -1);
+  if (inconnus.length) {
+    throw new Error('Type d\'acte inconnu : ' + inconnus.join(', ') +
+                    '\nTypes valides : ' + TYPES.join(', '));
+  }
+  return voulus;
+}
 
 async function harvest() {
   const gs = loadGs();
+  // Avant toute écriture : le fichier doit avoir l'en-tête d'aujourd'hui,
+  // sans quoi les lignes ajoutées seraient plus larges que leur en-tête.
+  migrerEntete();
   const ck = loadCk();
   // --refresh : on ne saute plus les buckets déjà faits ; on relit leur total
   // annoncé et on ne re-récolte que ceux qui ont grossi, en dédoublonnant.
@@ -291,9 +420,14 @@ async function harvest() {
   const csv = fs.createWriteStream(OUT_CSV, { flags: 'a' });
   if (newFile) csv.write(csvLine(COLS));
 
+  const types = typesDemandes();
+  if (types.length !== TYPES.length) {
+    console.log(`--types : ${types.join(', ')} seulement (sur ${TYPES.join(', ')})`);
+  }
+
   for (const commune of gs.COMMUNES.map(c => c.nom)) {
     let session = null;  // ouvert paresseusement (rien si toute la commune est déjà faite)
-    for (const type of TYPES) {
+    for (const type of types) {
       for (const letter of LETTERS) {
         const key = commune + '|' + type + '|' + letter;
         if (!REFRESH && ck.done.has(key)) continue;
@@ -360,6 +494,89 @@ function selftest() {
   const tricky = ['a,b', 'il a dit "x"', 'multi\nligne', ''];
   const back = parseCsvLine(csvLine(tricky).replace(/\n$/, ''));
   assert(back[0] === 'a,b' && back[1] === 'il a dit "x"' && back[3] === '', 'parseCsvLine champs délicats');
+  // ---- entourage (conjoint, père, mère) ----
+  const marie = { type_acte: 'M', commune: 'St-Paul', date_iso: '1892-01-05', obs: 'n°300',
+    numero: 'X2', url_demande_photo: '',
+    personnes: {
+      principal: { nom: 'GOVINDIN', prenom: 'Paul', sexe: 'M',
+        pere: { nom: 'GOVINDIN', prenom: 'Ary' }, mere: { nom: 'MOUTOU', prenom: 'Rose' } },
+      conjoint: { nom: 'SINNAMA', prenom: 'Marie Rose' }
+    } };
+  const rm = recordToRow(marie);
+  const col = (nom) => rm[COLS.indexOf(nom)];
+  assert(col('conjoint_nom') === 'SINNAMA' && col('conjoint_prenom') === 'Marie Rose', 'conjoint écrit');
+  assert(col('pere_nom') === 'GOVINDIN' && col('pere_prenom') === 'Ary', 'père écrit');
+  assert(col('mere_nom') === 'MOUTOU' && col('mere_prenom') === 'Rose', 'mère écrit');
+  assert(col('nom') === 'GOVINDIN' && col('obs') === 'n°300', 'colonnes voisines non décalées');
+  // Un acte sans parents ne doit pas décaler les colonnes suivantes.
+  assert(row[COLS.indexOf('obs')] === 'n°77' && row[COLS.indexOf('pere_nom')] === '',
+         'parents absents -> cases vides, pas de décalage');
+
+  // ---- naissance : ce que le site donne VRAIMENT sur les parents ----
+  // Pas de nom, seulement la marque « + » (décédé), plus parrain et marraine.
+  const naiss = { type_acte: 'N', commune: 'St-Denis', date_iso: '1892-06-16', obs: 'n°18',
+    numero: 'X3', url_demande_photo: '',
+    personnes: { principal: { nom: 'APASSAMY', prenom: 'Amélie', sexe: 'F',
+      parrain: 'MOUTOU Jean', marraine: 'NAIKEN Rose',
+      pere: { decede: true }, mere: { decede: false } } } };
+  const rn = recordToRow(naiss);
+  const cn = (nom) => rn[COLS.indexOf(nom)];
+  assert(cn('pere_decede') === '1', 'naissance : père décédé -> 1');
+  assert(cn('mere_decede') === '', 'naissance : mère vivante -> case vide, pas « false »');
+  assert(cn('parrain') === 'MOUTOU Jean' && cn('marraine') === 'NAIKEN Rose', 'parrain et marraine écrits');
+  assert(cn('pere_nom') === '' && cn('mere_nom') === '',
+         'naissance : aucun nom de parent (le site n’en donne pas)');
+  assert(cn('nom') === 'APASSAMY' && cn('obs') === 'n°18', 'naissance : colonnes voisines non décalées');
+  assert(COLS.length === rn.length && COLS.length === rm.length, 'toutes les lignes ont la largeur de COLS');
+
+  // ---- découpage d'un CSV entier, guillemets et sauts de ligne compris ----
+  const brut = csvLine(['a', 'b']) + csvLine(['x,1', 'il a dit "y"']) + csvLine(['multi\nligne', 'z']);
+  const rows = lignesCsv(brut);
+  assert(rows.length === 3, 'lignesCsv : 3 lignes');
+  assert(rows[1][0] === 'x,1' && rows[1][1] === 'il a dit "y"', 'lignesCsv : virgule et guillemets');
+  assert(rows[2][0] === 'multi\nligne', 'lignesCsv : saut de ligne dans un champ');
+
+  // ---- migration d'en-tête ----
+  const os = require('os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'idlr-mig-'));
+  const f = path.join(tmp, 'actes.csv');
+  try {
+    // Un fichier à l'ancien format, avec un champ piégeux et une ligne à
+    // saut de ligne : c'est exactement ce qu'un découpage naïf détruirait.
+    fs.writeFileSync(f,
+      csvLine(['matricule', 'type_acte', 'nom', 'obs', 'numero']) +
+      csvLine(['77', 'N', 'HOARAU', 'a,b "c"', 'X1']) +
+      csvLine(['78', 'D', 'PETAN', 'multi\nligne', 'X2']));
+
+    const m = migrerEntete(f);
+    assert(m && m.entete.join(',') === COLS.join(','), 'migration : nouvel en-tête');
+    assert(m.lignes.length === 2, 'migration : lignes conservées');
+    assert(m.lignes[0][COLS.indexOf('nom')] === 'HOARAU', 'migration : valeur remise PAR NOM');
+    assert(m.lignes[0][COLS.indexOf('obs')] === 'a,b "c"', 'migration : virgule et guillemets intacts');
+    assert(m.lignes[1][COLS.indexOf('obs')] === 'multi\nligne', 'migration : saut de ligne intact');
+    assert(m.lignes[0][COLS.indexOf('pere_nom')] === '', 'migration : colonne neuve vide');
+    assert(m.ajoutees.indexOf('pere_nom') !== -1, 'migration : parents annoncés comme ajoutés');
+    assert(fs.existsSync(f + '.avant-migration'), 'migration : original sauvegardé');
+    assert(migrerEntete(f) === null, 'migration : rejouable sans effet');
+    assert(lignesCsv(fs.readFileSync(f, 'utf8'))[0].join(',') === COLS.join(','),
+           'migration : le fichier sur disque porte le nouvel en-tête');
+
+    let refuse = false;
+    fs.writeFileSync(f, csvLine(['matricule', 'colonne_inconnue']) + csvLine(['1', 'x']));
+    try { migrerEntete(f); } catch { refuse = true; }
+    assert(refuse, 'migration : colonne inconnue -> refus plutôt que perte silencieuse');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // ---- filtre --types ----
+  assert(typesDemandes([]).join(',') === TYPES.join(','), '--types absent -> tous les types');
+  assert(typesDemandes(['--types=M,PM']).join(',') === 'M,PM', '--types restreint');
+  assert(typesDemandes(['--types=m']).join(',') === 'M', '--types insensible à la casse');
+  let typeKo = false;
+  try { typesDemandes(['--types=X']); } catch { typeKo = true; }
+  assert(typeKo, '--types inconnu -> erreur explicite');
+
   const gs = loadGs();
   assert(gs.COMMUNES.length === 25 && typeof gs.parseResultsPage === 'function', 'gs chargé');
   assert(gs.findCommune('Saint-Denis').code === '9741211', 'findCommune');
@@ -368,6 +585,12 @@ function selftest() {
 
 if (process.argv.includes('--selftest')) {
   selftest();                       // hors ligne : aucune autorisation requise
+} else if (process.argv.includes('--migrer')) {
+  // Aligner l'en-tête ne touche pas au réseau : la récolte le fait de toute
+  // façon au démarrage, mais pouvoir le lancer seul permet de vérifier le
+  // résultat avant d'engager des heures de requêtes.
+  try { migrerEntete(); console.log('actes.csv est à jour.'); }
+  catch (e) { console.error(e.message); process.exit(1); }
 } else {
   // Une recolte complete represente des heures de trafic sur un serveur
   // associatif. En dev, il faut l'autoriser explicitement.
